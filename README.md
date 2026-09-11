@@ -37,7 +37,8 @@ Radarcape receiver ──(JSON)──> JSON stream server ──(TCP :31009)─�
     `MIN_UPDATE_MINUTES` (2 minutes by default);
   - uses the receiver's own per-message timestamp (`uti` in the JSON) rather
     than local poll time, so logged times reflect when the aircraft was
-    actually seen;
+    actually seen. All timestamps are stored and displayed in UTC (the
+    results page notes this under its title);
   - automatically keeps `BaseStation.sqb`'s `Aircraft` table (Registration,
     ICAOTypeCode) up to date from the JSON feed's own `reg`/`typ` fields —
     only writing when a value is new or changed, and never overwriting a

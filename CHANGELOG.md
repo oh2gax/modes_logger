@@ -24,6 +24,8 @@ under that day's heading.
 - Numeric position fields (`Lat`, `Lon`, `Altitude`, `Track`, `Speed`) now default to `NULL` instead of `0` when not yet known, so a genuine `0` (e.g. track due north, ground-level altitude) is never confused with "no data yet." The results page renders unknown values as a blank cell instead of a misleading `0` or the literal text "None".
 - Results table now scrolls inside its own box (both vertically and, on narrow screens, horizontally), with the column header row locked to the top of that box at all times — so column labels stay visible on long result lists, and the table is usable on a phone without losing track of which column is which. Same behaviour on desktop and mobile browsers.
 - Results table: Registration and ICAO24 columns swapped (Registration now comes right after `#`, since it's available for most sightings), and the Registration column is now frozen in place horizontally, staying visible while swiping/scrolling sideways through the rest of the columns — most useful on a phone.
+- Search page date field label changed from "Date (DD-MM-YYYY):" to "Date (dd-mm-yyyy):".
+- Results page now shows a small "Times in UTC" note under the title, to make the displayed timestamps' timezone explicit.
 
 ### Removed
 - `readme.txt` (replaced by this changelog and `README.md`).
