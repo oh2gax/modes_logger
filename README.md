@@ -128,3 +128,13 @@ repo.
 This project intentionally started as simple as possible: log first/last
 seen times, query them back. Planned next steps include GUI improvements to
 the web UI. See [CHANGELOG.md](CHANGELOG.md) for the dated history of changes.
+
+## Contributing
+
+This project is developed and maintained by Otso Laakso / OH2GAX. Feedback, observations and bug reports — especially from UI testing and real-world operational use — are welcome.
+
+## License
+
+This project is licensed under the GNU General Public License v3.0. You are free to use, study, modify and distribute this software under the terms of the GPLv3. Any derivative work must also be distributed under the same license.
+
+See the [LICENSE](https://github.com/oh2gax/mode_s_wind/blob/master/LICENSE) file for the full license text, or visit https://www.gnu.org/licenses/gpl-3.0.html.
