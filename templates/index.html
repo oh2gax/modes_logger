@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>MODE-S Database Search</title>
+
+</head>
+
+<body>
+
+    <h1>MODE-S & ADS-B Database Search</h1>
+
+    <form action="/query" method="get">
+
+        <div style="margin-bottom: 8px;">
+            <label for="search_field">Search by:</label>
+
+            <select id="search_field" name="search_field">
+                <option value="icao24" selected>ICAO24</option>
+                <option value="registration">Registration</option>
+                <option value="callsign">Callsign</option>
+            </select>
+
+            <input type="text" id="search_value" name="search_value" placeholder="* wildcard allowed">
+        </div>
+
+        <div style="margin-bottom: 8px;">
+            <label for="date">Date (DD-MM-YYYY):</label>
+
+            <input type="text" id="date" name="date">
+        </div>
+
+        <div style="margin-bottom: 8px;">
+            <label for="max_altitude">Max last altitude:</label>
+
+            <input type="number" id="max_altitude" name="max_altitude">
+        </div>
+
+        <button type="submit">Search</button>
+
+    </form>
+
+    <div id="results"></div>
+
+</body>
+
+</html>
+

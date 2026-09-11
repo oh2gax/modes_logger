@@ -1,0 +1,18 @@
+# Runtime data — local to each machine, shouldn't be committed
+*.db
+*.db-wal
+*.db-shm
+*.sqb
+*.sqb-wal
+*.sqb-shm
+
+# Editor / OS cruft
+*.swp
+*.swo
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/

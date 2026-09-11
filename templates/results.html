@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Query Results</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f8ff;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+            font-size: 12px;
+        }
+        h1 {
+            text-align: center;
+            color: #004f7c;
+        }
+        table {
+            width: 100%;
+            margin-top: 20px;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 4px 6px;
+            text-align: center;
+            border: 1px solid #ddd;
+        }
+        th {
+            background-color: #004f7c;
+            color: white;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        tr:hover {
+            background-color: #ddd;
+        }
+        .numbering {
+            width: 50px;
+        }
+    </style>
+</head>
+<body>
+    <h1>MODE-S & ADS-B Query Results</h1>
+    <table>
+        <thead>
+            <tr>
+                <th class="numbering">#</th>
+                <th>ICAO24</th>
+                <th>Registration</th>
+                <th>Aircraft Type</th>
+                <th>First Callsign</th>
+                <th>First Squawk</th>
+                <th>First Lat</th>
+                <th>First Lon</th>
+                <th>First Altitude</th>
+                <th>First Track</th>
+                <th>First Speed</th>
+                <th>First DateTime</th>
+                <th>Last Callsign</th>
+                <th>Last Squawk</th>
+                <th>Last Lat</th>
+                <th>Last Lon</th>
+                <th>Last Altitude</th>
+                <th>Last Track</th>
+                <th>Last Speed</th>
+                <th>Last DateTime</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in results %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td>{{ row[0] }}</td>   <!-- ICAO24 -->
+                <td>{{ row[1] }}</td>   <!-- Registration -->
+                <td>{{ row[2] }}</td>   <!-- Aircraft Type -->
+                <td>{{ row[3] }}</td>   <!-- First Callsign -->
+                <td>{{ row[4] }}</td>   <!-- First Squawk -->
+                <td>{{ row[5] }}</td>   <!-- First Lat -->
+                <td>{{ row[6] }}</td>   <!-- First Lon -->
+                <td>{{ row[7] }}</td>   <!-- First Altitude -->
+                <td>{{ row[8] }}</td>   <!-- First Track -->
+                <td>{{ row[9] }}</td>   <!-- First Speed -->
+                <td>{{ row[10] }}</td>  <!-- First DateTime -->
+                <td>{{ row[11] }}</td>  <!-- Last Callsign -->
+                <td>{{ row[12] }}</td>  <!-- Last Squawk -->
+                <td>{{ row[13] }}</td>  <!-- Last Lat -->
+                <td>{{ row[14] }}</td>  <!-- Last Lon -->
+                <td>{{ row[15] }}</td>  <!-- Last Altitude -->
+                <td>{{ row[16] }}</td>  <!-- Last Track -->
+                <td>{{ row[17] }}</td>  <!-- Last Speed -->
+                <td>{{ row[18] }}</td>  <!-- Last DateTime -->
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>
