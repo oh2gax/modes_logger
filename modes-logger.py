@@ -18,8 +18,23 @@ DB_NAME = os.path.join(BASE_DIR, "adsb_data.db")
 SQB_DB_PATH = os.path.join(BASE_DIR, "BaseStation.sqb")
 
 FETCH_INTERVAL = 10          # seconds between polls
-MIN_UPDATE_MINUTES = 2       # debounce: ignore updates inside this window
+MIN_UPDATE_MINUTES = 2       # debounce: ignore Last*-updates inside this window
 FLIGHT_GAP_SECONDS = 3600    # >1 hour means a new flight
+
+# Both windows below allow filling in still-missing First* fields from a
+# later message, without ever touching FirstDateTime/FirstEpoch and without
+# overwriting a field that's already known — see fill_missing_first_identity
+# / fill_missing_first_position. They're split because the two kinds of
+# field behave very differently over time:
+#   - Callsign/squawk rarely change mid-flight, so a long window is safe —
+#     it's really just "keep trying until the receiver finally decodes it."
+#   - Position/altitude/track/speed drift continuously, so filling them in
+#     from a message too long after first contact would make "First" quietly
+#     describe a materially different place/altitude than the true first
+#     sighting — so this window is kept short.
+IDENTITY_FILL_WINDOW_SECONDS = 600   # callsign + squawk: 10 minutes
+POSITION_FILL_WINDOW_SECONDS = 60    # lat/lon/altitude/track/speed: 60 seconds
+
 SOCKET_TIMEOUT = 10          # seconds to wait for the JSON snapshot
 
 TS_FMT = "%d-%m-%Y %H:%M"    # stored human-readable format
@@ -116,8 +131,24 @@ def init_db():
         '''CREATE TABLE IF NOT EXISTS current_flights (
                ICAO24 TEXT PRIMARY KEY,
                record_id INTEGER,
-               last_epoch INTEGER
+               last_epoch INTEGER,
+               first_epoch INTEGER
            )'''
+    )
+    conn.commit()
+
+    # Add first_epoch if migrating from an older current_flights table. Unlike
+    # last_epoch (which moves on every Last*-write), first_epoch is set once
+    # at row creation and never touched again — it's what the fill-window
+    # checks measure "time since first contact" against, independently of
+    # how many debounced Last*-updates have happened since.
+    if not table_has_column(conn, "current_flights", "first_epoch"):
+        cur.execute("ALTER TABLE current_flights ADD COLUMN first_epoch INTEGER")
+        conn.commit()
+    cur.execute(
+        '''UPDATE current_flights SET first_epoch = (
+               SELECT FirstEpoch FROM aircraft WHERE aircraft.id = current_flights.record_id
+           ) WHERE first_epoch IS NULL OR first_epoch = 0'''
     )
     conn.commit()
 
@@ -129,15 +160,15 @@ def init_db():
         if cur.fetchone():
             continue
         cur.execute(
-            "SELECT id, LastEpoch FROM aircraft WHERE ICAO24=? ORDER BY LastEpoch DESC LIMIT 1",
+            "SELECT id, FirstEpoch, LastEpoch FROM aircraft WHERE ICAO24=? ORDER BY LastEpoch DESC LIMIT 1",
             (icao,)
         )
         r = cur.fetchone()
         if r:
-            rid, le = r
+            rid, fe, le = r
             cur.execute(
-                "INSERT OR REPLACE INTO current_flights (ICAO24, record_id, last_epoch) VALUES (?, ?, ?)",
-                (icao, rid, le)
+                "INSERT OR REPLACE INTO current_flights (ICAO24, record_id, last_epoch, first_epoch) VALUES (?, ?, ?, ?)",
+                (icao, rid, le, fe)
             )
     conn.commit()
 
@@ -218,6 +249,37 @@ def upsert_basestation_registration(conn, icao24, registration, actype):
             (new_reg, new_type, icao24)
         )
 
+def fill_missing_first_identity(cur, record_id, callsign, squawk):
+    """Fill FirstCallsign/FirstSquawk if still blank, never overwriting an
+    already-known value. Safe over a long window since these rarely change
+    mid-flight — see IDENTITY_FILL_WINDOW_SECONDS."""
+    if not callsign and squawk == "0":
+        return  # this message has nothing new to offer either
+    cur.execute(
+        '''UPDATE aircraft SET
+            FirstCallsign = CASE WHEN (FirstCallsign IS NULL OR FirstCallsign = '') AND ? <> '' THEN ? ELSE FirstCallsign END,
+            FirstSquawk   = CASE WHEN (FirstSquawk IS NULL OR FirstSquawk = '0') AND ? <> '0' THEN ? ELSE FirstSquawk END
+           WHERE id = ?''',
+        (callsign, callsign, squawk, squawk, record_id)
+    )
+
+def fill_missing_first_position(cur, record_id, lat, lon, altitude, track, speed):
+    """Fill First position/altitude/track/speed if still NULL, never
+    overwriting an already-known value. Kept to a short window since these
+    drift continuously — see POSITION_FILL_WINDOW_SECONDS."""
+    if lat is None and lon is None and altitude is None and track is None and speed is None:
+        return  # this message has nothing new to offer either
+    cur.execute(
+        '''UPDATE aircraft SET
+            FirstLat      = COALESCE(FirstLat, ?),
+            FirstLon      = COALESCE(FirstLon, ?),
+            FirstAltitude = COALESCE(FirstAltitude, ?),
+            FirstTrack    = COALESCE(FirstTrack, ?),
+            FirstSpeed    = COALESCE(FirstSpeed, ?)
+           WHERE id = ?''',
+        (lat, lon, altitude, track, speed, record_id)
+    )
+
 def process_aircraft_list(aircraft_list):
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
@@ -232,11 +294,14 @@ def process_aircraft_list(aircraft_list):
 
             callsign = (ac.get("fli") or "").strip()
             squawk = ac.get("squ") or "0"
-            lat = ac.get("lat") if ac.get("lat") is not None else 0
-            lon = ac.get("lon") if ac.get("lon") is not None else 0
-            altitude = ac.get("alt") if ac.get("alt") is not None else 0
-            track = ac.get("trk") if ac.get("trk") is not None else 0
-            speed = ac.get("spd") if ac.get("spd") is not None else 0
+            # None (SQL NULL) means "not known yet" — kept distinct from a
+            # genuine 0 (e.g. track due north, speed 0) so it can safely be
+            # backfilled later without ever clobbering a real reading.
+            lat = ac.get("lat")
+            lon = ac.get("lon")
+            altitude = ac.get("alt")
+            track = ac.get("trk")
+            speed = ac.get("spd")
             registration = (ac.get("reg") or "").strip()
             actype = (ac.get("typ") or "").strip()
 
@@ -252,7 +317,7 @@ def process_aircraft_list(aircraft_list):
             upsert_basestation_registration(conn_base, icao24, registration, actype)
 
             # Get or create pointer
-            cur.execute("SELECT record_id, last_epoch FROM current_flights WHERE ICAO24=?", (icao24,))
+            cur.execute("SELECT record_id, last_epoch, first_epoch FROM current_flights WHERE ICAO24=?", (icao24,))
             ptr = cur.fetchone()
 
             if ptr is None:
@@ -271,16 +336,25 @@ def process_aircraft_list(aircraft_list):
                 cur.execute("SELECT id FROM aircraft WHERE ICAO24=? AND FirstEpoch=? AND LastEpoch=?", (icao24, now_epoch, now_epoch))
                 rid = cur.fetchone()[0]
                 cur.execute(
-                    "INSERT OR REPLACE INTO current_flights (ICAO24, record_id, last_epoch) VALUES (?, ?, ?)",
-                    (icao24, rid, now_epoch)
+                    "INSERT OR REPLACE INTO current_flights (ICAO24, record_id, last_epoch, first_epoch) VALUES (?, ?, ?, ?)",
+                    (icao24, rid, now_epoch, now_epoch)
                 )
                 continue
 
             # There is a current flight pointer
-            record_id, last_epoch = ptr[0], (ptr[1] or 0)
+            record_id, last_epoch, first_epoch = ptr[0], (ptr[1] or 0), (ptr[2] or ptr[1] or now_epoch)
             delta = now_epoch - last_epoch
+            age = now_epoch - first_epoch  # time since this row's true first contact
 
-            # Debounce: ignore if inside MIN_UPDATE_MINUTES
+            # These run independently of the debounce below and never move
+            # last_epoch/first_epoch, so they can't interfere with debounce
+            # timing or with FirstDateTime/FirstEpoch's own truthfulness.
+            if age <= IDENTITY_FILL_WINDOW_SECONDS:
+                fill_missing_first_identity(cur, record_id, callsign, squawk)
+            if age <= POSITION_FILL_WINDOW_SECONDS:
+                fill_missing_first_position(cur, record_id, lat, lon, altitude, track, speed)
+
+            # Debounce: ignore Last*-updates if inside MIN_UPDATE_MINUTES
             if delta < MIN_UPDATE_MINUTES * 60:
                 continue
 
@@ -300,8 +374,8 @@ def process_aircraft_list(aircraft_list):
                 cur.execute("SELECT id FROM aircraft WHERE ICAO24=? AND FirstEpoch=? AND LastEpoch=?", (icao24, now_epoch, now_epoch))
                 new_id = cur.fetchone()[0]
                 cur.execute(
-                    "UPDATE current_flights SET record_id=?, last_epoch=? WHERE ICAO24=?",
-                    (new_id, now_epoch, icao24)
+                    "UPDATE current_flights SET record_id=?, last_epoch=?, first_epoch=? WHERE ICAO24=?",
+                    (new_id, now_epoch, now_epoch, icao24)
                 )
             else:
                 # Same flight: update last* and pointer.

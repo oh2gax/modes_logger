@@ -12,6 +12,8 @@ under that day's heading.
 - Flight callsign (`fli` field) is now recorded per sighting as `FirstCallsign`/`LastCallsign` in `adsb_data.db` and shown in the results table. A momentarily blank callsign on a later ping no longer erases a previously known one.
 - Search page now has a "Search by" dropdown to search by ICAO24, Registration, or Callsign (previously ICAO24 only); wildcard `*` works in all three modes.
 - Added `README.md` (GitHub-style project overview), `requirements.txt`, and `.gitignore`.
+- Still-blank `First*` fields (`FirstCallsign`, `FirstSquawk`, `FirstLat`, `FirstLon`, `FirstAltitude`, `FirstTrack`, `FirstSpeed`) can now be backfilled from a later, richer message for the same flight, without ever moving `FirstDateTime`/`FirstEpoch` and without overwriting a field that's already known. Callsign/squawk use a 10-minute window (`IDENTITY_FILL_WINDOW_SECONDS`), since they rarely change mid-flight; position/altitude/track/speed use a 60-second window (`POSITION_FILL_WINDOW_SECONDS`), since they drift continuously. This improves data completeness for aircraft first picked up at long range or low altitude, where the receiver often can't decode everything on the very first message.
+- `current_flights` gained a `first_epoch` column (the true first-contact time for the active flight, independent of debounced updates) to support the backfill windows above; existing rows are migrated automatically on first run.
 
 ### Changed
 - Message timestamps now prefer the receiver's own per-aircraft capture time (`uti` in the JSON) over local poll time.
@@ -19,6 +21,7 @@ under that day's heading.
 - Search form fields (search, date, max altitude) are now stacked vertically, one per row, instead of inline on one row.
 - Results page heading changed from "ADS-B Aircraft Query Results" to "MODE-S & ADS-B Query Results"; search page heading changed from "MODE-S database search" to "MODE-S & ADS-B Database Search".
 - Results table font size and cell padding reduced to fit more rows on screen.
+- Numeric position fields (`Lat`, `Lon`, `Altitude`, `Track`, `Speed`) now default to `NULL` instead of `0` when not yet known, so a genuine `0` (e.g. track due north, ground-level altitude) is never confused with "no data yet." The results page renders unknown values as a blank cell instead of a misleading `0` or the literal text "None".
 
 ### Removed
 - `readme.txt` (replaced by this changelog and `README.md`).

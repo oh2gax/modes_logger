@@ -42,7 +42,16 @@ Radarcape receiver ──(JSON)──> JSON stream server ──(TCP :31009)─�
     ICAOTypeCode) up to date from the JSON feed's own `reg`/`typ` fields —
     only writing when a value is new or changed, and never overwriting a
     known value with a blank one. Other tools that read `BaseStation.sqb`
-    keep working unmodified.
+    keep working unmodified;
+  - backfills still-blank `First*` fields from a later, richer message for
+    the same flight, without ever moving `FirstDateTime`/`FirstEpoch` and
+    without overwriting a field that's already known. This matters because
+    a plane first picked up at long range or low altitude often doesn't have
+    everything (callsign, position) decoded yet on the very first message.
+    Callsign/squawk get a longer window since they rarely change mid-flight;
+    position/altitude/track/speed get a much shorter one since they drift
+    continuously — see `IDENTITY_FILL_WINDOW_SECONDS` /
+    `POSITION_FILL_WINDOW_SECONDS` below.
 - The Flask app then serves a simple search form and results table over that
   history, joining in Registration/Aircraft Type from `BaseStation.sqb` at
   query time.
@@ -97,6 +106,8 @@ All tunable settings live as constants near the top of `modes-logger.py`:
 | `FETCH_INTERVAL` | `10` (seconds) | How often to poll the JSON source |
 | `MIN_UPDATE_MINUTES` | `2` | Debounce window per aircraft |
 | `FLIGHT_GAP_SECONDS` | `3600` | Gap after which a new sighting starts a new flight row |
+| `IDENTITY_FILL_WINDOW_SECONDS` | `600` | How long after true first contact a still-blank `FirstCallsign`/`FirstSquawk` can be backfilled |
+| `POSITION_FILL_WINDOW_SECONDS` | `60` | How long after true first contact a still-blank `FirstLat`/`FirstLon`/`FirstAltitude`/`FirstTrack`/`FirstSpeed` can be backfilled |
 
 ## Database schema
 
@@ -104,9 +115,9 @@ All tunable settings live as constants near the top of `modes-logger.py`:
 
 - `ICAO24` — aircraft's 24-bit Mode S address (hex)
 - `FirstCallsign` / `LastCallsign` — flight callsign as reported by the receiver
-- `First*` / `Last*` — Squawk, Lat, Lon, Altitude, Track, Speed, DateTime, Epoch at first and most recent sighting of this flight
+- `First*` / `Last*` — Squawk, Lat, Lon, Altitude, Track, Speed, DateTime, Epoch at first and most recent sighting of this flight. The numeric position fields are `NULL` (not `0`) until an actual reading is received, so a genuine `0` (e.g. track due north) is never mistaken for "unknown"; still-`NULL` `First*` fields can be backfilled from a later message — see Configuration above.
 - `SeenCount` — capped at 5, just a rough "how many updates" indicator
-- `current_flights` — internal pointer table (ICAO24 → active `aircraft` row) used to route incoming updates to the right row
+- `current_flights` — internal pointer table (ICAO24 → active `aircraft` row, plus `first_epoch`, the true first-contact time used for the backfill windows) used to route incoming updates to the right row
 
 **`BaseStation.sqb` → `Aircraft` table** — shared registration/type lookup, keyed by `ModeS` (= ICAO24), auto-populated by modes-logger.py and readable by any other ADS-B tool that expects this standard file.
 
