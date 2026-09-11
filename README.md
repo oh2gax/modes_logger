@@ -127,4 +127,4 @@ repo.
 
 This project intentionally started as simple as possible: log first/last
 seen times, query them back. Planned next steps include GUI improvements to
-the web UI. See commit history for the detailed changelog going forward.
+the web UI. See [CHANGELOG.md](CHANGELOG.md) for the dated history of changes.
