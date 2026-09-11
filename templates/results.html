@@ -17,9 +17,13 @@
             text-align: center;
             color: #004f7c;
         }
+        .table-wrapper {
+            overflow: auto;
+            margin-top: 20px;
+            max-height: calc(100vh - 140px);
+        }
         table {
             width: 100%;
-            margin-top: 20px;
             border-collapse: collapse;
         }
         th, td {
@@ -30,6 +34,9 @@
         th {
             background-color: #004f7c;
             color: white;
+            position: sticky;
+            top: 0;
+            z-index: 2;
         }
         tr:nth-child(even) {
             background-color: #f2f2f2;
@@ -40,16 +47,34 @@
         .numbering {
             width: 50px;
         }
+        .sticky-col {
+            position: sticky;
+            left: 0;
+            z-index: 1;
+            background-color: #f0f8ff;
+        }
+        tr:nth-child(even) .sticky-col {
+            background-color: #f2f2f2;
+        }
+        tr:hover .sticky-col {
+            background-color: #ddd;
+        }
+        th.sticky-col {
+            z-index: 3;
+            background-color: #004f7c;
+            color: white;
+        }
     </style>
 </head>
 <body>
     <h1>MODE-S & ADS-B Query Results</h1>
+    <div class="table-wrapper">
     <table>
         <thead>
             <tr>
                 <th class="numbering">#</th>
+                <th class="sticky-col">Registration</th>
                 <th>ICAO24</th>
-                <th>Registration</th>
                 <th>Aircraft Type</th>
                 <th>First Callsign</th>
                 <th>First Squawk</th>
@@ -73,8 +98,8 @@
             {% for row in results %}
             <tr>
                 <td>{{ loop.index }}</td>
+                <td class="sticky-col">{{ row[1] }}</td>   <!-- Registration -->
                 <td>{{ row[0] }}</td>   <!-- ICAO24 -->
-                <td>{{ row[1] }}</td>   <!-- Registration -->
                 <td>{{ row[2] }}</td>   <!-- Aircraft Type -->
                 <td>{{ row[3] }}</td>   <!-- First Callsign -->
                 <td>{{ row[4] }}</td>   <!-- First Squawk -->
@@ -96,5 +121,6 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
 </body>
 </html>

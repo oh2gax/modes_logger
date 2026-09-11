@@ -94,6 +94,12 @@ Open the site and search by ICAO24 (wildcards allowed, e.g. `15*`), by date
 (full `DD-MM-YYYY` or a partial match like `02-2025`), and/or by a maximum
 last-seen altitude.
 
+The results page also works reasonably well on a phone: the table scrolls
+within its own box (vertically, and horizontally on narrow screens) with the
+column header row staying locked in place, and the Registration column
+frozen on the left, so it stays readable for a quick check on the go, not
+just at a desktop.
+
 ## Configuration
 
 All tunable settings live as constants near the top of `modes-logger.py`:
