@@ -53,9 +53,32 @@ Radarcape receiver ──(JSON)──> JSON stream server ──(TCP :31009)─�
     position/altitude/track/speed get a much shorter one since they drift
     continuously — see `IDENTITY_FILL_WINDOW_SECONDS` /
     `POSITION_FILL_WINDOW_SECONDS` below.
+  - flags any aircraft found in the military/government watchlists (see
+    below) so both the Results and Live Flights pages can highlight them.
 - The Flask app then serves a simple search form and results table over that
   history, joining in Registration/Aircraft Type from `BaseStation.sqb` at
-  query time.
+  query time, plus a Live Flights page showing what's currently being
+  received.
+
+## Military & government aircraft alerts
+
+Drop the `plane-alert-gov.csv` and `plane-alert-mil.csv` files from the
+[plane-alert-db](https://github.com/sdr-enthusiasts/plane-alert-db) project
+into an `alertdb/` folder next to `modes-logger.py`. At startup:
+
+- both CSVs are loaded into memory and matched against incoming aircraft by
+  ICAO24. A match is highlighted with a light blue row (military) or light
+  green row (government) on both the Results page and the Live Flights page.
+- their Registration/Aircraft Type values are written into `BaseStation.sqb`
+  for those ICAO24s, since these manually-curated lists are treated as more
+  trustworthy than whatever the live feed itself reports. A later live
+  sighting of the same aircraft can still update that entry again afterward
+  — the same as any other aircraft — so this is "the CSV wins at startup,"
+  not a permanent lock.
+
+Both files are optional: a missing one is logged and skipped rather than
+crashing the app. Since the project only reads them at startup, update the
+CSVs and restart `modes-logger.py` to pick up changes.
 
 ## Requirements
 
@@ -92,14 +115,23 @@ on `172.26.1.162:5000` — edit the `app.run(...)` call at the bottom of
 `modes-logger.py` to change this).
 
 Open the site and search by ICAO24 (wildcards allowed, e.g. `15*`), by date
-(full `DD-MM-YYYY` or a partial match like `02-2025`), and/or by a maximum
-last-seen altitude.
+(full `DD-MM-YYYY` or a partial match like `02-2025` — a small calendar icon
+next to the field can fill in a full date for you, but it stays a plain
+editable text field afterward), and/or by a maximum last-seen altitude.
 
 The results page also works reasonably well on a phone: the table scrolls
 within its own box (vertically, and horizontally on narrow screens) with the
 column header row staying locked in place, and the Registration column
 frozen on the left, so it stays readable for a quick check on the go, not
 just at a desktop.
+
+For a near-real-time view instead of searching history, open `/liveflights`
+to see what's currently being received (Registration, ICAO24, Callsign,
+Type, Squawk, Altitude, Track, Speed, Latitude, Longitude), refreshing
+automatically every `LIVE_PAGE_REFRESH_SECONDS`. Click the Registration,
+ICAO24, or Altitude column headers to sort by that column (click again to
+reverse); it opens sorted by altitude ascending (lowest first) by default,
+and keeps whatever sort you pick across each refresh.
 
 ## Configuration
 
@@ -115,6 +147,9 @@ All tunable settings live as constants near the top of `modes-logger.py`:
 | `FLIGHT_GAP_SECONDS` | `3600` | Gap after which a new sighting starts a new flight row |
 | `IDENTITY_FILL_WINDOW_SECONDS` | `600` | How long after true first contact a still-blank `FirstCallsign`/`FirstSquawk` can be backfilled |
 | `POSITION_FILL_WINDOW_SECONDS` | `60` | How long after true first contact a still-blank `FirstLat`/`FirstLon`/`FirstAltitude`/`FirstTrack`/`FirstSpeed` can be backfilled |
+| `ALERTDB_DIR` | `<script dir>/alertdb` | Folder holding the optional military/government watchlist CSVs |
+| `ALERT_GOV_CSV` / `ALERT_MIL_CSV` | `plane-alert-gov.csv` / `plane-alert-mil.csv` in `ALERTDB_DIR` | The two watchlist files, from [plane-alert-db](https://github.com/sdr-enthusiasts/plane-alert-db) |
+| `LIVE_PAGE_REFRESH_SECONDS` | `10` | How often `/liveflights` polls `/api/liveflights` for fresh data |
 
 ## Database schema
 
@@ -126,14 +161,15 @@ All tunable settings live as constants near the top of `modes-logger.py`:
 - `SeenCount` — capped at 5, just a rough "how many updates" indicator
 - `current_flights` — internal pointer table (ICAO24 → active `aircraft` row, plus `first_epoch`, the true first-contact time used for the backfill windows) used to route incoming updates to the right row
 
-**`BaseStation.sqb` → `Aircraft` table** — shared registration/type lookup, keyed by `ModeS` (= ICAO24), auto-populated by modes-logger.py and readable by any other ADS-B tool that expects this standard file.
+**`BaseStation.sqb` → `Aircraft` table** — shared registration/type lookup, keyed by `ModeS` (= ICAO24), auto-populated by modes-logger.py (from the live feed, and at startup from the alert-db CSVs — see Military & government aircraft alerts above) and readable by any other ADS-B tool that expects this standard file.
 
 ## Repo layout
 
 This repo intentionally contains only what modes_logger itself needs to run:
 
 - [`modes-logger.py`](modes-logger.py) — the whole application (poller + Flask web UI)
-- [`templates/`](templates/) — the two Jinja templates for the web UI (search form, results table)
+- [`templates/`](templates/) — the Jinja templates for the web UI (search form, results table, live flights)
+- [`alertdb/`](alertdb/) — the optional `plane-alert-gov.csv`/`plane-alert-mil.csv` watchlist files (see Military & government aircraft alerts above)
 - `requirements.txt` — the one dependency (Flask)
 - `adsb_data.db`, `BaseStation.sqb` — local SQLite data files, created/updated at runtime (not meant to be committed — see `.gitignore`)
 

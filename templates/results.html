@@ -47,6 +47,12 @@
         tr:nth-child(even) {
             background-color: #f2f2f2;
         }
+        tr.mil-alert {
+            background-color: #cce5ff;
+        }
+        tr.gov-alert {
+            background-color: #d9f2d9;
+        }
         tr:hover {
             background-color: #ddd;
         }
@@ -61,6 +67,12 @@
         }
         tr:nth-child(even) .sticky-col {
             background-color: #f2f2f2;
+        }
+        tr.mil-alert .sticky-col {
+            background-color: #cce5ff;
+        }
+        tr.gov-alert .sticky-col {
+            background-color: #d9f2d9;
         }
         tr:hover .sticky-col {
             background-color: #ddd;
@@ -103,7 +115,8 @@
         </thead>
         <tbody>
             {% for row in results %}
-            <tr>
+            {% set alert = alert_lookup.get(row[0]) %}
+            <tr class="{{ 'mil-alert' if alert == 'mil' else ('gov-alert' if alert == 'gov' else '') }}">
                 <td>{{ loop.index }}</td>
                 <td class="sticky-col">{{ row[1] }}</td>   <!-- Registration -->
                 <td>{{ row[0] }}</td>   <!-- ICAO24 -->

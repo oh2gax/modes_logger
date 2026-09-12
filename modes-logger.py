@@ -1,10 +1,12 @@
+import csv
 import json
 import os
 import socket
 import sqlite3
+import threading
 import time
 from datetime import datetime
-from flask import Flask, request, render_template
+from flask import Flask, jsonify, request, render_template
 
 # ---------------- Configuration ----------------
 ADSB_JSON_HOST = "127.0.0.1"
@@ -38,6 +40,29 @@ POSITION_FILL_WINDOW_SECONDS = 60    # lat/lon/altitude/track/speed: 60 seconds
 SOCKET_TIMEOUT = 10          # seconds to wait for the JSON snapshot
 
 TS_FMT = "%d-%m-%Y %H:%M"    # stored human-readable format
+
+# Manually-maintained watchlists of military/government aircraft, from
+# https://github.com/sdr-enthusiasts/plane-alert-db - matched by ICAO24.
+# Loaded once at startup; edit the CSVs and restart to pick up changes.
+ALERTDB_DIR = os.path.join(BASE_DIR, "alertdb")
+ALERT_GOV_CSV = os.path.join(ALERTDB_DIR, "plane-alert-gov.csv")
+ALERT_MIL_CSV = os.path.join(ALERTDB_DIR, "plane-alert-mil.csv")
+
+LIVE_PAGE_REFRESH_SECONDS = 10   # how often liveflights.html polls /api/liveflights
+
+# ---------------- Shared in-memory state ----------------
+# ALERT_DB: ICAO24 -> {"category": "mil"/"gov", "registration":, "operator":, "type":}
+# populated once at startup by load_alert_db(). Read-only after that, from
+# both the poller thread and Flask request threads, so no lock is needed.
+ALERT_DB = {}
+
+# LIVE_SNAPSHOT: ICAO24 -> latest raw fields from the most recent successful
+# poll, entirely separate from adsb_data.db - it exists only to answer "what
+# is currently being received right now" for the live flights page, and is
+# replaced wholesale each poll cycle (not merged), so an aircraft that drops
+# out of range disappears from it as soon as one poll no longer reports it.
+LIVE_SNAPSHOT = {}
+LIVE_SNAPSHOT_LOCK = threading.Lock()
 
 # ---------------- Helpers ----------------
 def now_pair():
@@ -195,6 +220,60 @@ def init_basestation_db():
     conn.commit()
     conn.close()
 
+# ---------------- Alert DB (military/government watchlist) ----------------
+def load_alert_db():
+    """Load the plane-alert-db gov/mil CSVs into the in-memory ALERT_DB dict.
+    Each file is optional - a missing or unreadable one is logged and
+    skipped rather than crashing the app, since these are manually-supplied
+    reference files, not required for modes_logger to run."""
+    global ALERT_DB
+    alert_db = {}
+    for path, category in ((ALERT_GOV_CSV, "gov"), (ALERT_MIL_CSV, "mil")):
+        if not os.path.exists(path):
+            print(f"Alert DB: {path} not found, skipping ({category})")
+            continue
+        try:
+            count = 0
+            with open(path, newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    # A couple of entries in the upstream CSVs are missing a
+                    # leading zero (e.g. "10166" instead of "010166"), most
+                    # likely lost to spreadsheet auto-formatting at some
+                    # point - zero-pad to the full 6 hex digits so they still
+                    # match a real ICAO24.
+                    icao = (row.get("$ICAO") or "").strip().upper().zfill(6)
+                    if not icao:
+                        continue
+                    alert_db[icao] = {
+                        "category": category,
+                        "registration": (row.get("$Registration") or "").strip(),
+                        "operator": (row.get("$Operator") or "").strip(),
+                        "type": (row.get("$ICAO Type") or "").strip(),
+                    }
+                    count += 1
+            print(f"Alert DB: loaded {count} {category} entries from {path}")
+        except Exception as e:
+            print(f"Alert DB: failed to load {path}: {e}")
+    ALERT_DB = alert_db
+
+def sync_alert_db_to_basestation():
+    """Push alert-db registrations/types into BaseStation.sqb at startup.
+    These manually-curated lists are treated as more trustworthy than
+    whatever the live feed happens to report, so they're written
+    unconditionally via the same upsert the live feed itself uses - the live
+    feed can still update an entry again later if it reports something
+    different for that ICAO24 (see README for this trade-off)."""
+    if not ALERT_DB:
+        return
+    conn_base = sqlite3.connect(SQB_DB_PATH)
+    try:
+        for icao24, info in ALERT_DB.items():
+            upsert_basestation_registration(conn_base, icao24, info["registration"], info["type"])
+        conn_base.commit()
+    finally:
+        conn_base.close()
+
 # ---------------- Fetch & Process ----------------
 def fetch_json_snapshot(host, port, timeout=SOCKET_TIMEOUT):
     """Connect to the ADS-B JSON stream server, read the full snapshot it
@@ -281,10 +360,12 @@ def fill_missing_first_position(cur, record_id, lat, lon, altitude, track, speed
     )
 
 def process_aircraft_list(aircraft_list):
+    global LIVE_SNAPSHOT
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
     conn_base = sqlite3.connect(SQB_DB_PATH)
     fallback_str, fallback_epoch = now_pair()
+    snapshot = {}  # this poll's aircraft, for the live flights page - see LIVE_SNAPSHOT
 
     try:
         for ac in aircraft_list:
@@ -304,6 +385,15 @@ def process_aircraft_list(aircraft_list):
             speed = ac.get("spd")
             registration = (ac.get("reg") or "").strip()
             actype = (ac.get("typ") or "").strip()
+
+            # Raw snapshot for the live flights page - independent of the
+            # debounce/history logic below, always reflects this exact poll
+            snapshot[icao24] = {
+                "callsign": callsign, "squawk": squawk,
+                "lat": lat, "lon": lon, "altitude": altitude,
+                "track": track, "speed": speed,
+                "reg": registration, "typ": actype,
+            }
 
             # Prefer the receiver's own capture time (uti) over poll time
             msg_uti = ac.get("uti")
@@ -404,6 +494,10 @@ def process_aircraft_list(aircraft_list):
     finally:
         conn.close()
         conn_base.close()
+        # Publish this poll's snapshot for the live flights page, win or
+        # lose on the DB writes above - it's independent, in-memory state.
+        with LIVE_SNAPSHOT_LOCK:
+            LIVE_SNAPSHOT = snapshot
 
 # ---------------- Web ----------------
 app = Flask(__name__)
@@ -464,6 +558,7 @@ def query():
     rows = cur_main.fetchall()
 
     results = []
+    alert_lookup = {}  # ICAO24 -> "mil"/"gov", for rows found in the alert watchlists
     for row in rows:
         icao = row[0]
         cur_base.execute("SELECT Registration, ICAOTypeCode FROM Aircraft WHERE ModeS = ?", (icao,))
@@ -471,15 +566,67 @@ def query():
         registration = base[0] if base and base[0] else "Not Found"
         ac_type = base[1] if base and base[1] else "Not Found"
         results.append((icao, registration, ac_type) + row[1:])
+        alert = ALERT_DB.get(icao)
+        if alert:
+            alert_lookup[icao] = alert["category"]
 
     conn_main.close()
     conn_base.close()
-    return render_template("results.html", results=results)
+    return render_template("results.html", results=results, alert_lookup=alert_lookup)
+
+@app.route("/liveflights")
+def liveflights():
+    return render_template("liveflights.html", refresh_ms=LIVE_PAGE_REFRESH_SECONDS * 1000)
+
+@app.route("/api/liveflights")
+def api_liveflights():
+    """JSON snapshot of what's currently being received, for liveflights.html
+    to poll. Registration/Type fall back to BaseStation.sqb when the live
+    feed's own reg/typ is blank for that aircraft, same as the results page."""
+    conn_base = sqlite3.connect(SQB_DB_PATH)
+    cur_base = conn_base.cursor()
+
+    with LIVE_SNAPSHOT_LOCK:
+        snapshot_items = sorted(LIVE_SNAPSHOT.items())
+
+    aircraft_out = []
+    for icao24, ac in snapshot_items:
+        reg = ac["reg"]
+        typ = ac["typ"]
+        if not reg or not typ:
+            cur_base.execute("SELECT Registration, ICAOTypeCode FROM Aircraft WHERE ModeS = ?", (icao24,))
+            base = cur_base.fetchone()
+            if base:
+                reg = reg or base[0] or ""
+                typ = typ or base[1] or ""
+        alert = ALERT_DB.get(icao24)
+        aircraft_out.append({
+            "icao24": icao24,
+            "registration": reg,
+            "type": typ,
+            "callsign": ac["callsign"],
+            "squawk": ac["squawk"],
+            "altitude": ac["altitude"],
+            "track": ac["track"],
+            "speed": ac["speed"],
+            "lat": ac["lat"],
+            "lon": ac["lon"],
+            "alert": alert["category"] if alert else None,
+        })
+
+    conn_base.close()
+    return jsonify({
+        "aircraft": aircraft_out,
+        "count": len(aircraft_out),
+        "updated_utc": datetime.utcnow().strftime("%H:%M:%S"),
+    })
 
 # ---------------- Main ----------------
 if __name__ == "__main__":
     init_db()
     init_basestation_db()
+    load_alert_db()
+    sync_alert_db_to_basestation()
     from threading import Thread
     Thread(target=fetch_adsb_data, daemon=True).start()
     app.run(debug=True, host="172.26.1.162", port=5000)

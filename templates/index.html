@@ -10,6 +10,29 @@
 
     <title>MODE-S Database Search</title>
 
+    <style>
+        /* Narrow "icon-only" date picker button next to the free-text date
+           field - hides the native text/spinner parts in WebKit/Blink
+           browsers (Chrome, Edge, Safari) so just the calendar icon shows.
+           Firefox doesn't support these pseudo-elements and instead shows
+           its own already-compact native date control - a fine fallback. */
+        input[type="date"].date-picker-icon {
+            width: 22px;
+            border: none;
+            background: transparent;
+            padding: 0;
+            vertical-align: middle;
+        }
+        input[type="date"].date-picker-icon::-webkit-datetime-edit,
+        input[type="date"].date-picker-icon::-webkit-inner-spin-button,
+        input[type="date"].date-picker-icon::-webkit-clear-button {
+            display: none;
+        }
+        input[type="date"].date-picker-icon::-webkit-calendar-picker-indicator {
+            padding: 0;
+        }
+    </style>
+
 </head>
 
 <body>
@@ -33,7 +56,8 @@
         <div style="margin-bottom: 8px;">
             <label for="date">Date (dd-mm-yyyy):</label>
 
-            <input type="text" id="date" name="date">
+            <input type="text" id="date" name="date" size="11">
+            <input type="date" id="date_picker" class="date-picker-icon" title="Pick a date" aria-label="Pick a date from a calendar">
         </div>
 
         <div style="margin-bottom: 8px;">
@@ -47,6 +71,17 @@
     </form>
 
     <div id="results"></div>
+
+    <script>
+        document.getElementById('date_picker').addEventListener('change', function () {
+            if (!this.value) return;
+            // Native date input value is yyyy-mm-dd; the search box uses
+            // dd-mm-yyyy and stays freely editable/partial afterward.
+            const parts = this.value.split('-');
+            const y = parts[0], m = parts[1], d = parts[2];
+            document.getElementById('date').value = d + '-' + m + '-' + y;
+        });
+    </script>
 
 </body>
 

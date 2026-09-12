@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Flights</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f8ff;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+            font-size: 12px;
+        }
+        h1 {
+            text-align: center;
+            color: #004f7c;
+        }
+        .subtitle {
+            text-align: center;
+            font-size: 11px;
+            color: #666;
+            margin-top: -8px;
+        }
+        .table-wrapper {
+            overflow: auto;
+            margin-top: 20px;
+            max-height: calc(100vh - 140px);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 4px 6px;
+            text-align: center;
+            border: 1px solid #ddd;
+        }
+        th {
+            background-color: #004f7c;
+            color: white;
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        tr.mil-alert {
+            background-color: #cce5ff;
+        }
+        tr.gov-alert {
+            background-color: #d9f2d9;
+        }
+        tr:hover {
+            background-color: #ddd;
+        }
+        .numbering {
+            width: 50px;
+        }
+        .sticky-col {
+            position: sticky;
+            left: 0;
+            z-index: 1;
+            background-color: #f0f8ff;
+        }
+        tr:nth-child(even) .sticky-col {
+            background-color: #f2f2f2;
+        }
+        tr.mil-alert .sticky-col {
+            background-color: #cce5ff;
+        }
+        tr.gov-alert .sticky-col {
+            background-color: #d9f2d9;
+        }
+        tr:hover .sticky-col {
+            background-color: #ddd;
+        }
+        th.sticky-col {
+            z-index: 3;
+            background-color: #004f7c;
+            color: white;
+        }
+        th[data-sort] {
+            cursor: pointer;
+        }
+        th[data-sort]:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <h1>MODE-S & ADS-B Live Flights</h1>
+    <p class="subtitle" id="status">Loading…</p>
+    <div class="table-wrapper">
+    <table>
+        <thead>
+            <tr>
+                <th class="numbering">#</th>
+                <th class="sticky-col" data-sort="registration">Registration</th>
+                <th data-sort="icao24">ICAO24</th>
+                <th>Callsign</th>
+                <th>Type</th>
+                <th>Squawk</th>
+                <th data-sort="altitude">Altitude</th>
+                <th>Track</th>
+                <th>Speed</th>
+                <th>Latitude</th>
+                <th>Longitude</th>
+            </tr>
+        </thead>
+        <tbody id="live-tbody">
+        </tbody>
+    </table>
+    </div>
+
+    <script>
+        const REFRESH_MS = {{ refresh_ms }};
+        const SORT_LABELS = { registration: 'Registration', icao24: 'ICAO24', altitude: 'Altitude' };
+
+        // Default: lowest altitude on top when the page is first opened.
+        let sortState = { key: 'altitude', dir: 'asc' };
+        let currentData = [];
+
+        function cell(value, className) {
+            const td = document.createElement('td');
+            td.textContent = (value === null || value === undefined) ? '' : value;
+            if (className) td.className = className;
+            return td;
+        }
+
+        function compareValues(a, b, key) {
+            const va = a[key];
+            const vb = b[key];
+            const aBlank = (va === null || va === undefined || va === '');
+            const bBlank = (vb === null || vb === undefined || vb === '');
+            // Unknown values always sort to the bottom, in either direction,
+            // so they don't jump to the top just because a direction flipped.
+            if (aBlank && bBlank) return 0;
+            if (aBlank) return 1;
+            if (bBlank) return -1;
+            if (key === 'altitude') {
+                return va - vb;
+            }
+            return String(va).localeCompare(String(vb), undefined, { numeric: true, sensitivity: 'base' });
+        }
+
+        function sortData(data) {
+            const withBlanks = data.filter(ac => {
+                const v = ac[sortState.key];
+                return v === null || v === undefined || v === '';
+            });
+            const withValues = data.filter(ac => !withBlanks.includes(ac));
+            withValues.sort((a, b) => {
+                const cmp = compareValues(a, b, sortState.key);
+                return sortState.dir === 'asc' ? cmp : -cmp;
+            });
+            return withValues.concat(withBlanks);
+        }
+
+        function updateHeaderIndicators() {
+            document.querySelectorAll('th[data-sort]').forEach(th => {
+                const key = th.dataset.sort;
+                const arrow = sortState.key === key ? (sortState.dir === 'asc' ? ' ▲' : ' ▼') : '';
+                th.textContent = SORT_LABELS[key] + arrow;
+            });
+        }
+
+        function renderRows(aircraft) {
+            const tbody = document.getElementById('live-tbody');
+            tbody.innerHTML = '';
+            aircraft.forEach((ac, i) => {
+                const tr = document.createElement('tr');
+                if (ac.alert === 'mil') {
+                    tr.className = 'mil-alert';
+                } else if (ac.alert === 'gov') {
+                    tr.className = 'gov-alert';
+                }
+                tr.appendChild(cell(i + 1));
+                tr.appendChild(cell(ac.registration, 'sticky-col'));
+                tr.appendChild(cell(ac.icao24));
+                tr.appendChild(cell(ac.callsign));
+                tr.appendChild(cell(ac.type));
+                tr.appendChild(cell(ac.squawk));
+                tr.appendChild(cell(ac.altitude));
+                tr.appendChild(cell(ac.track));
+                tr.appendChild(cell(ac.speed));
+                tr.appendChild(cell(ac.lat));
+                tr.appendChild(cell(ac.lon));
+                tbody.appendChild(tr);
+            });
+        }
+
+        async function refresh() {
+            const status = document.getElementById('status');
+            try {
+                const res = await fetch('/api/liveflights');
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                currentData = data.aircraft;
+                renderRows(sortData(currentData));
+                status.textContent = data.count + ' aircraft — last updated ' + data.updated_utc + ' UTC';
+            } catch (err) {
+                status.textContent = 'Update failed: ' + err.message;
+            }
+        }
+
+        document.querySelectorAll('th[data-sort]').forEach(th => {
+            th.addEventListener('click', () => {
+                const key = th.dataset.sort;
+                if (sortState.key === key) {
+                    sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
+                } else {
+                    sortState.key = key;
+                    sortState.dir = 'asc';
+                }
+                updateHeaderIndicators();
+                renderRows(sortData(currentData));
+            });
+        });
+
+        updateHeaderIndicators();
+        refresh();
+        setInterval(refresh, REFRESH_MS);
+    </script>
+</body>
+</html>
