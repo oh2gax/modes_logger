@@ -2,25 +2,36 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <script>
+        // Applied before the stylesheet loads, so the page never flashes
+        // the wrong theme on load.
+        (function () {
+            try {
+                var t = localStorage.getItem('modes_logger_theme') || 'light';
+                document.documentElement.setAttribute('data-theme', t);
+            } catch (e) { /* ignore */ }
+        })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Query Results</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='theme.css') }}">
     <style>
         body {
             font-family: Arial, sans-serif;
-            background-color: #f0f8ff;
-            color: #333;
+            background-color: var(--bg);
+            color: var(--text);
             margin: 0;
             padding: 20px;
             font-size: 12px;
         }
         h1 {
             text-align: center;
-            color: #004f7c;
+            color: var(--header-bg);
         }
         .subtitle {
             text-align: center;
             font-size: 11px;
-            color: #666;
+            color: var(--subtitle-text);
             margin-top: -8px;
         }
         .table-wrapper {
@@ -35,26 +46,26 @@
         th, td {
             padding: 4px 6px;
             text-align: center;
-            border: 1px solid #ddd;
+            border: 1px solid var(--border);
         }
         th {
-            background-color: #004f7c;
-            color: white;
+            background-color: var(--header-bg);
+            color: var(--header-text);
             position: sticky;
             top: 0;
             z-index: 2;
         }
         tr:nth-child(even) {
-            background-color: #f2f2f2;
+            background-color: var(--row-alt-bg);
         }
         tr.mil-alert {
-            background-color: #cce5ff;
+            background-color: var(--mil-bg);
         }
         tr.gov-alert {
-            background-color: #d9f2d9;
+            background-color: var(--gov-bg);
         }
         tr:hover {
-            background-color: #ddd;
+            background-color: var(--row-hover-bg);
         }
         .numbering {
             width: 50px;
@@ -63,28 +74,29 @@
             position: sticky;
             left: 0;
             z-index: 1;
-            background-color: #f0f8ff;
+            background-color: var(--bg);
         }
         tr:nth-child(even) .sticky-col {
-            background-color: #f2f2f2;
+            background-color: var(--row-alt-bg);
         }
         tr.mil-alert .sticky-col {
-            background-color: #cce5ff;
+            background-color: var(--mil-bg);
         }
         tr.gov-alert .sticky-col {
-            background-color: #d9f2d9;
+            background-color: var(--gov-bg);
         }
         tr:hover .sticky-col {
-            background-color: #ddd;
+            background-color: var(--row-hover-bg);
         }
         th.sticky-col {
             z-index: 3;
-            background-color: #004f7c;
-            color: white;
+            background-color: var(--header-bg);
+            color: var(--header-text);
         }
     </style>
 </head>
 <body>
+    <button id="theme-toggle" class="theme-toggle" title="Toggle light/dark mode" aria-label="Toggle light/dark mode"></button>
     <h1>MODE-S & ADS-B Query Results</h1>
     <p class="subtitle">Times in UTC</p>
     <div class="table-wrapper">
@@ -142,5 +154,6 @@
         </tbody>
     </table>
     </div>
+    <script src="{{ url_for('static', filename='theme.js') }}"></script>
 </body>
 </html>

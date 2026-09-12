@@ -1,0 +1,70 @@
+/* Shared light/dark theme variables and toggle-button styling for the
+   Query, Results, and Live Flights pages. Light mode is the default
+   (no data-theme attribute, or data-theme="light"); dark mode activates
+   under [data-theme="dark"], set on <html> by theme.js. */
+
+:root {
+    /* Lets native controls (date picker, scrollbars, etc.) follow the
+       active theme too, without having to restyle each one by hand. */
+    color-scheme: light;
+    --bg: #f0f8ff;
+    --text: #333;
+    --header-bg: #004f7c;
+    --header-text: #ffffff;
+    --border: #ddd;
+    --row-alt-bg: #f2f2f2;
+    --row-hover-bg: #ddd;
+    --mil-bg: #cce5ff;
+    --gov-bg: #d9f2d9;
+    --subtitle-text: #666;
+    --link-text: #004f7c;
+    /* Toggle button icon: a plain dark blue moon in light mode. */
+    --icon-color: #0d3450;
+}
+
+[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #15191d;
+    --text: #d7dee4;
+    --header-bg: #0d3450;
+    --header-text: #eaf2f8;
+    --border: #3a4148;
+    --row-alt-bg: #1d2227;
+    --row-hover-bg: #2b333a;
+    --mil-bg: #163a5c;
+    --gov-bg: #17402a;
+    --subtitle-text: #9aa4ad;
+    --link-text: #6cb6e8;
+    /* Toggle button icon: a plain white/light sun in dark mode. */
+    --icon-color: #eef1f4;
+}
+
+/* Simple, flat box (not a bright/filled circle) that blends with the page
+   and just outlines the icon in the theme's own color. */
+.theme-toggle {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    z-index: 1000;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--icon-color);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
+.theme-toggle:hover {
+    border-color: var(--icon-color);
+}
+
+.theme-toggle svg {
+    width: 16px;
+    height: 16px;
+    display: block;
+}

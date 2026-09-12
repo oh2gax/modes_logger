@@ -6,11 +6,39 @@
 
     <meta charset="UTF-8">
 
+    <script>
+        // Applied before the stylesheet loads, so the page never flashes
+        // the wrong theme on load.
+        (function () {
+            try {
+                var t = localStorage.getItem('modes_logger_theme') || 'light';
+                document.documentElement.setAttribute('data-theme', t);
+            } catch (e) { /* ignore */ }
+        })();
+    </script>
+
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <title>MODE-S Database Search</title>
 
+    <link rel="stylesheet" href="{{ url_for('static', filename='theme.css') }}">
+
     <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+            color: var(--header-bg);
+        }
+        a {
+            color: var(--link-text);
+        }
+
         /* Narrow "icon-only" date picker button next to the free-text date
            field - hides the native text/spinner parts in WebKit/Blink
            browsers (Chrome, Edge, Safari) so just the calendar icon shows.
@@ -36,6 +64,8 @@
 </head>
 
 <body>
+
+    <button id="theme-toggle" class="theme-toggle" title="Toggle light/dark mode" aria-label="Toggle light/dark mode"></button>
 
     <h1>MODE-S & ADS-B Database Search</h1>
 
@@ -82,6 +112,8 @@
             document.getElementById('date').value = d + '-' + m + '-' + y;
         });
     </script>
+
+    <script src="{{ url_for('static', filename='theme.js') }}"></script>
 
 </body>
 

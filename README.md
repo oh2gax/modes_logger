@@ -144,6 +144,14 @@ some aircraft, blank otherwise — and its raw value (often slightly off a
 round number, e.g. `36992`) is rounded to the nearest 100ft before display.
 Vert Rate is the vertical rate in feet per minute.
 
+All three pages (Query, Results, Live Flights) have a light/dark mode
+toggle: a small square icon button in the top-left corner, showing a plain
+moon in light mode or a plain sun in dark mode (click to switch). Light
+mode is the default; your choice is remembered in the browser (via
+`localStorage`) and applied instantly on every page, with no page reload
+needed. The shared styling and toggle logic live in `static/theme.css` and
+`static/theme.js`, served by Flask's default static file handling.
+
 ## Configuration
 
 All tunable settings live as constants near the top of `modes-logger.py`:
@@ -180,6 +188,7 @@ This repo intentionally contains only what modes_logger itself needs to run:
 
 - [`modes-logger.py`](modes-logger.py) — the whole application (poller + Flask web UI)
 - [`templates/`](templates/) — the Jinja templates for the web UI (search form, results table, live flights)
+- [`static/`](static/) — shared front-end assets (currently just the light/dark theme CSS/JS used by all three pages)
 - [`alertdb/`](alertdb/) — the optional `plane-alert-gov.csv`/`plane-alert-mil.csv` watchlist files (see Military & government aircraft alerts above)
 - `requirements.txt` — the one dependency (Flask)
 - `adsb_data.db`, `BaseStation.sqb` — local SQLite data files, created/updated at runtime (not meant to be committed — see `.gitignore`)
