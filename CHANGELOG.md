@@ -12,6 +12,7 @@ under that day's heading.
 - New Live Flights page (`/liveflights`) showing currently-received aircraft (Registration, ICAO24, Callsign, Type, Squawk, Altitude, Track, Speed, Latitude, Longitude) with the same sticky header, frozen Registration column, and alert-row coloring as the Results page. Unlike the Results/Search pages, this page auto-refreshes via JavaScript (polling a new `/api/liveflights` JSON endpoint every `LIVE_PAGE_REFRESH_SECONDS`, 10s by default) rather than a full page reload.
 - Live Flights page: Registration, ICAO24, and Altitude column headers are now clickable to sort (click again to reverse direction); the page opens sorted by altitude ascending (lowest first) by default, and the chosen sort is kept across each auto-refresh. Aircraft with an unknown altitude or blank registration always sort to the bottom regardless of direction.
 - Search page: a small calendar icon next to the date field opens a native date picker and fills the field in `dd-mm-yyyy` format when a day is picked; the field stays freely editable afterward (including partial searches like `02-2025`) and the box itself is narrower to match the fixed date format.
+- Added the missing `LICENSE` file (GNU General Public License v3.0) to the repo, and a README "Acknowledgments" section crediting [plane-alert-db](https://github.com/sdr-enthusiasts/plane-alert-db) as the source of the watchlist CSV data.
 
 ## 2026-09-11
 

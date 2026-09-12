@@ -187,8 +187,16 @@ the web UI. See [CHANGELOG.md](CHANGELOG.md) for the dated history of changes.
 
 This project is developed and maintained by Otso Laakso / OH2GAX. Feedback, observations and bug reports — especially from UI testing and real-world operational use — are welcome.
 
+## Acknowledgments
+
+The military and government watchlist CSVs used in `alertdb/` (see "Military
+& government aircraft alerts" above) come from the
+[plane-alert-db](https://github.com/sdr-enthusiasts/plane-alert-db) project.
+Thanks to its maintainers and contributors for compiling and maintaining
+that data.
+
 ## License
 
 This project is licensed under the GNU General Public License v3.0. You are free to use, study, modify and distribute this software under the terms of the GPLv3. Any derivative work must also be distributed under the same license.
 
-See the [LICENSE](https://github.com/oh2gax/mode_s_wind/blob/master/LICENSE) file for the full license text, or visit https://www.gnu.org/licenses/gpl-3.0.html.
+See the [LICENSE](LICENSE) file for the full license text, or visit https://www.gnu.org/licenses/gpl-3.0.html.
