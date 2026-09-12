@@ -4,11 +4,29 @@ A small, simple MODE-S/ADS-B logger and query tool. It watches a live feed of
 aircraft seen by a local receiver and records, per aircraft, the first and
 last time each one was seen — not every individual position update — into a
 SQLite database. A minimal Flask web UI lets you query that history by
-ICAO24 address, date, or altitude.
+ICAO24 address, registration, callsign, date, or altitude, watch what's
+currently in range in near-real-time, and get visually flagged whenever a
+tracked military or government aircraft shows up.
 
 The project intentionally stays small: one main script, one SQLite database
 for flight history, and the industry-standard `BaseStation.sqb` file for
 aircraft registration/type lookups so other ADS-B tools can share that data.
+
+At a glance, modes_logger currently gives you:
+
+- **History logging** — first/last-seen tracking per flight, not a firehose
+  of every position update (see "How it works" below for why).
+- **A search page** (`/`) to look up past flights by ICAO24, registration, or
+  callsign (wildcards supported), by exact or partial date, and/or by a
+  maximum last-seen altitude.
+- **A live view** (`/liveflights`) of everything currently being received,
+  auto-refreshing, with sortable columns and aviation-style altitude
+  formatting (flight levels, QNH altitudes).
+- **Military/government watchlist alerts** — aircraft matched against the
+  [plane-alert-db](https://github.com/sdr-enthusiasts/plane-alert-db) CSVs
+  are highlighted on both the Results and Live Flights pages, so a tracked
+  aircraft stands out immediately instead of scrolling past it unnoticed.
+- **Light/dark mode** on every page, remembered across visits.
 
 ## How it works
 
@@ -59,6 +77,17 @@ Radarcape receiver ──(JSON)──> JSON stream server ──(TCP :31009)─�
   history, joining in Registration/Aircraft Type from `BaseStation.sqb` at
   query time, plus a Live Flights page showing what's currently being
   received.
+
+Why first/last instead of logging every update: a receiver can emit a
+message for the same aircraft every second or two while it's in range, and
+almost none of that is interesting after the fact — what you actually want
+to know later is "when did this plane first show up, and when did it
+leave/go quiet." Keeping only two snapshots per flight (plus a capped
+`SeenCount`) keeps `adsb_data.db` small and queries fast even after months
+of continuous logging, at the cost of not having a full track log for any
+individual flight. If you ever need full per-position tracks, that's a
+different kind of tool (e.g. `dump1090`/`tar1090`'s own history, or a
+time-series DB) — this project deliberately doesn't try to be that.
 
 ## Military & government aircraft alerts
 
@@ -114,43 +143,95 @@ the background poller in a daemon thread, and serves the web UI (by default
 on `172.26.1.162:5000` — edit the `app.run(...)` call at the bottom of
 `modes-logger.py` to change this).
 
-Open the site and search by ICAO24 (wildcards allowed, e.g. `15*`), by date
-(full `DD-MM-YYYY` or a partial match like `02-2025` — a small calendar icon
-next to the field can fill in a full date for you, but it stays a plain
-editable text field afterward), and/or by a maximum last-seen altitude.
+Open the site in a browser to use the three pages described below.
 
-The results page also works reasonably well on a phone: the table scrolls
-within its own box (vertically, and horizontally on narrow screens) with the
-column header row staying locked in place, and the Registration column
-frozen on the left, so it stays readable for a quick check on the go, not
-just at a desktop.
+## Web UI
 
-For a near-real-time view instead of searching history, open `/liveflights`
-to see what's currently being received (Registration, ICAO24, Callsign,
-Type, Squawk, Altitude, Selected Alt, Vert Rate, Track, Speed, Latitude,
-Longitude), refreshing automatically every `LIVE_PAGE_REFRESH_SECONDS`.
+### Search page (`/`)
+
+The search form has three fields, all optional and combinable:
+
+- **Search by** — a dropdown choosing what "Search value" matches against:
+  `ICAO24` (the default), `Registration`, or `Callsign`. All three accept
+  the `*` wildcard (translated to SQL's `%` under the hood), e.g. `15*` for
+  ICAO24 or `OH-*` for registration. Registration matching looks the value
+  up in `BaseStation.sqb` first, then filters the flight history by the
+  ICAO24 hexes found there — since registration itself isn't stored in
+  `adsb_data.db`. Callsign matching checks both `FirstCallsign` and
+  `LastCallsign`, since a callsign occasionally isn't decoded until partway
+  through a flight.
+- **Date** — matched as a substring against both `FirstDateTime` and
+  `LastDateTime` (which are stored as `dd-mm-yyyy HH:MM`), so a full date
+  like `12-09-2026` matches that exact day, while a partial value like
+  `02-2025` matches any flight with `02-2025` appearing anywhere in either
+  timestamp (i.e. any day in February 2025). The small calendar icon next
+  to the field is just a convenience — clicking a date in the picker fills
+  the text field in `dd-mm-yyyy` format, but the field stays a plain,
+  freely-editable text input, so partial searches still work afterward.
+- **Max last altitude** — filters to flights whose `LastAltitude` is
+  strictly below the given value (in feet); leave it blank to not filter by
+  altitude at all.
+
+Leaving every field at its default (ICAO24 search with an empty value)
+returns the entire flight history, oldest first.
+
+### Results page (`/query`)
+
+Shows every matching flight as one row, oldest first (by `LastEpoch`),
+numbered, with Registration/Aircraft Type joined in from `BaseStation.sqb`
+at query time (shown as "Not Found" when that ICAO24 isn't in there yet).
+Each row shows the full First/Last pair for callsign, squawk, position,
+altitude, track, speed, and timestamp (all times UTC — noted under the
+page title) — so you can see both when a flight was first picked up and
+its most recent known state in one place. A row is highlighted light blue
+or light green if that ICAO24 is on the military/government watchlist (see
+below). The table works reasonably well on a phone too: it scrolls within
+its own box (vertically, and horizontally on narrow screens) with the
+column header row locked in place and the Registration column frozen on
+the left, so you can keep track of which row is which while scrolling
+sideways through the rest of the columns.
+
+### Live Flights page (`/liveflights`)
+
+A near-real-time view of everything currently being received (Registration,
+ICAO24, Callsign, Type, Squawk, Altitude, Selected Alt, Vert Rate, Track,
+Speed, Latitude, Longitude), independent of the history in `adsb_data.db` —
+it's simply whatever was in the most recent poll of the JSON feed, so an
+aircraft disappears from this page as soon as one poll cycle no longer
+reports it. It refreshes automatically every `LIVE_PAGE_REFRESH_SECONDS`
+via a small JavaScript poller (no full page reload), and uses the same
+sticky header, frozen Registration column, and alert-row highlighting as
+the Results page.
+
 Click the Registration, ICAO24, Altitude, Selected Alt, or Vert Rate column
-headers to sort by that column (click again to reverse); it opens sorted by
-altitude ascending (lowest first) by default, and keeps whatever sort you
-pick across each refresh.
+headers to sort by that column (click again to reverse direction); it opens
+sorted by altitude ascending (lowest first) by default, and keeps whatever
+sort you pick across each refresh. Blank values (e.g. no registration yet,
+altitude not decoded) always sort to the bottom regardless of direction.
 
-Altitude and Selected Alt are shown in standard aviation shorthand: at or
-above a 5000ft transition altitude (hardcoded in `liveflights.html`) as a
-flight level, e.g. `F370` for 37000ft; below it, Altitude shows the exact
-altitude in feet (e.g. `2800`) and Selected Alt shows a QNH-style altitude,
-e.g. `A030` for 3000ft. Selected Alt is the autopilot/FCU's selected
-altitude from MODE-S Enhanced Surveillance (EHS) data — only available for
-some aircraft, blank otherwise — and its raw value (often slightly off a
-round number, e.g. `36992`) is rounded to the nearest 100ft before display.
-Vert Rate is the vertical rate in feet per minute.
+Altitude and Selected Alt are shown in standard aviation shorthand instead
+of raw feet: at or above a 5000ft transition altitude (hardcoded in
+`liveflights.html`) as a flight level, e.g. `F370` for 37000ft; below it,
+Altitude shows the exact altitude in feet (e.g. `2800`) and Selected Alt
+shows a QNH-style altitude, e.g. `A030` for 3000ft. Selected Alt is the
+autopilot/FCU's selected altitude from MODE-S Enhanced Surveillance (EHS)
+data — only available for some aircraft, blank otherwise — and its raw
+value (often slightly off a round number, e.g. `36992`) is rounded to the
+nearest 100ft before display; sorting still uses the exact underlying
+value, unaffected by the rounding/formatting. Vert Rate is the vertical
+rate in feet per minute, straight from the feed.
 
-All three pages (Query, Results, Live Flights) have a light/dark mode
-toggle: a small square icon button in the top-left corner, showing a plain
-moon in light mode or a plain sun in dark mode (click to switch). Light
-mode is the default; your choice is remembered in the browser (via
-`localStorage`) and applied instantly on every page, with no page reload
-needed. The shared styling and toggle logic live in `static/theme.css` and
-`static/theme.js`, served by Flask's default static file handling.
+### Light/dark mode
+
+All three pages have a light/dark mode toggle: a small square icon button
+in the top-left corner, showing a plain moon in light mode or a plain sun
+in dark mode (click to switch). Light mode is the default; your choice is
+remembered in the browser (via `localStorage`) and applied instantly on
+every page, with no page reload needed and no flash of the wrong theme on
+load. The shared styling and toggle logic live in `static/theme.css` and
+`static/theme.js`, served by Flask's default static file handling, and
+cover the table colors, headers, borders, and alert-row highlighting on
+all three pages.
 
 ## Configuration
 
