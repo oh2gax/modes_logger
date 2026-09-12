@@ -385,6 +385,11 @@ def process_aircraft_list(aircraft_list):
             speed = ac.get("spd")
             registration = (ac.get("reg") or "").strip()
             actype = (ac.get("typ") or "").strip()
+            # Vertical rate (ft/min) and MODE-S EHS autopilot-selected altitude
+            # ("alts") - only decoded from some messages, so often absent;
+            # left as None (blank cell on the live page) when not present.
+            vertical_rate = ac.get("vrt")
+            selected_altitude = ac.get("alts")
 
             # Raw snapshot for the live flights page - independent of the
             # debounce/history logic below, always reflects this exact poll
@@ -392,6 +397,7 @@ def process_aircraft_list(aircraft_list):
                 "callsign": callsign, "squawk": squawk,
                 "lat": lat, "lon": lon, "altitude": altitude,
                 "track": track, "speed": speed,
+                "vertical_rate": vertical_rate, "selected_altitude": selected_altitude,
                 "reg": registration, "typ": actype,
             }
 
@@ -607,6 +613,8 @@ def api_liveflights():
             "callsign": ac["callsign"],
             "squawk": ac["squawk"],
             "altitude": ac["altitude"],
+            "vertical_rate": ac.get("vertical_rate"),
+            "selected_altitude": ac.get("selected_altitude"),
             "track": ac["track"],
             "speed": ac["speed"],
             "lat": ac["lat"],

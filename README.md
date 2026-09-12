@@ -127,11 +127,22 @@ just at a desktop.
 
 For a near-real-time view instead of searching history, open `/liveflights`
 to see what's currently being received (Registration, ICAO24, Callsign,
-Type, Squawk, Altitude, Track, Speed, Latitude, Longitude), refreshing
-automatically every `LIVE_PAGE_REFRESH_SECONDS`. Click the Registration,
-ICAO24, or Altitude column headers to sort by that column (click again to
-reverse); it opens sorted by altitude ascending (lowest first) by default,
-and keeps whatever sort you pick across each refresh.
+Type, Squawk, Altitude, Selected Alt, Vert Rate, Track, Speed, Latitude,
+Longitude), refreshing automatically every `LIVE_PAGE_REFRESH_SECONDS`.
+Click the Registration, ICAO24, Altitude, Selected Alt, or Vert Rate column
+headers to sort by that column (click again to reverse); it opens sorted by
+altitude ascending (lowest first) by default, and keeps whatever sort you
+pick across each refresh.
+
+Altitude and Selected Alt are shown in standard aviation shorthand: at or
+above a 5000ft transition altitude (hardcoded in `liveflights.html`) as a
+flight level, e.g. `F370` for 37000ft; below it, Altitude shows the exact
+altitude in feet (e.g. `2800`) and Selected Alt shows a QNH-style altitude,
+e.g. `A030` for 3000ft. Selected Alt is the autopilot/FCU's selected
+altitude from MODE-S Enhanced Surveillance (EHS) data — only available for
+some aircraft, blank otherwise — and its raw value (often slightly off a
+round number, e.g. `36992`) is rounded to the nearest 100ft before display.
+Vert Rate is the vertical rate in feet per minute.
 
 ## Configuration
 

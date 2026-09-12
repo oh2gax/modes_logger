@@ -104,6 +104,8 @@
                 <th>Type</th>
                 <th>Squawk</th>
                 <th data-sort="altitude">Altitude</th>
+                <th data-sort="selected_altitude">Selected Alt</th>
+                <th data-sort="vertical_rate">Vert Rate</th>
                 <th>Track</th>
                 <th>Speed</th>
                 <th>Latitude</th>
@@ -117,7 +119,15 @@
 
     <script>
         const REFRESH_MS = {{ refresh_ms }};
-        const SORT_LABELS = { registration: 'Registration', icao24: 'ICAO24', altitude: 'Altitude' };
+        const SORT_LABELS = { registration: 'Registration', icao24: 'ICAO24', altitude: 'Altitude', vertical_rate: 'Vert Rate', selected_altitude: 'Selected Alt' };
+
+        // Transition altitude (feet), used by both the Altitude and Selected
+        // Alt columns: above it, shown as a flight level ("F370"); below it,
+        // shown as exact feet for Altitude ("2800") or as a QNH altitude for
+        // Selected Alt ("A023"). The raw "alts" (MCP/FCU selected altitude)
+        // value is also noisy (e.g. 36992, 3008, 18016 instead of a round
+        // number), so it's rounded to the nearest 100ft first.
+        const TRANSITION_ALTITUDE_FT = 5000;
 
         // Default: lowest altitude on top when the page is first opened.
         let sortState = { key: 'altitude', dir: 'asc' };
@@ -130,6 +140,26 @@
             return td;
         }
 
+        function formatSelectedAltitude(value) {
+            if (value === null || value === undefined || value === '') return '';
+            const rounded = Math.round(value / 100) * 100;
+            const level = Math.round(Math.abs(rounded) / 100);
+            const sign = rounded < 0 ? '-' : '';
+            const label = rounded >= TRANSITION_ALTITUDE_FT ? 'F' : 'A';
+            return sign + label + String(level).padStart(3, '0');
+        }
+
+        function formatAltitude(value) {
+            if (value === null || value === undefined || value === '') return '';
+            // Above the transition altitude, show a flight level (e.g. F370);
+            // below it, show the exact altitude in feet (e.g. 2800) as before.
+            if (value >= TRANSITION_ALTITUDE_FT) {
+                const level = Math.round(value / 100);
+                return 'F' + String(level).padStart(3, '0');
+            }
+            return String(value);
+        }
+
         function compareValues(a, b, key) {
             const va = a[key];
             const vb = b[key];
@@ -140,7 +170,7 @@
             if (aBlank && bBlank) return 0;
             if (aBlank) return 1;
             if (bBlank) return -1;
-            if (key === 'altitude') {
+            if (key === 'altitude' || key === 'vertical_rate' || key === 'selected_altitude') {
                 return va - vb;
             }
             return String(va).localeCompare(String(vb), undefined, { numeric: true, sensitivity: 'base' });
@@ -183,7 +213,9 @@
                 tr.appendChild(cell(ac.callsign));
                 tr.appendChild(cell(ac.type));
                 tr.appendChild(cell(ac.squawk));
-                tr.appendChild(cell(ac.altitude));
+                tr.appendChild(cell(formatAltitude(ac.altitude)));
+                tr.appendChild(cell(formatSelectedAltitude(ac.selected_altitude)));
+                tr.appendChild(cell(ac.vertical_rate));
                 tr.appendChild(cell(ac.track));
                 tr.appendChild(cell(ac.speed));
                 tr.appendChild(cell(ac.lat));

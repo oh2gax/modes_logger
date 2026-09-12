@@ -13,6 +13,9 @@ under that day's heading.
 - Live Flights page: Registration, ICAO24, and Altitude column headers are now clickable to sort (click again to reverse direction); the page opens sorted by altitude ascending (lowest first) by default, and the chosen sort is kept across each auto-refresh. Aircraft with an unknown altitude or blank registration always sort to the bottom regardless of direction.
 - Search page: a small calendar icon next to the date field opens a native date picker and fills the field in `dd-mm-yyyy` format when a day is picked; the field stays freely editable afterward (including partial searches like `02-2025`) and the box itself is narrower to match the fixed date format.
 - Added the missing `LICENSE` file (GNU General Public License v3.0) to the repo, and a README "Acknowledgments" section crediting [plane-alert-db](https://github.com/sdr-enthusiasts/plane-alert-db) as the source of the watchlist CSV data.
+- Live Flights page: two new columns, Selected Alt (autopilot/FCU-selected altitude, from MODE-S EHS data when available) and Vert Rate (vertical rate, ft/min), placed right after Altitude in that order; both are sortable like the existing columns.
+- Live Flights page: Altitude and Selected Alt now display in aviation shorthand instead of raw feet — a flight level (e.g. `F370`) at or above a 5000ft transition altitude, and below it, exact feet for Altitude (e.g. `2800`) or a QNH-style altitude for Selected Alt (e.g. `A030`). The raw Selected Alt value from the feed is rounded to the nearest 100ft first, since it's often reported slightly off a round number (e.g. `36992` instead of `37000`). Sorting on either column still uses the exact underlying value, unaffected by the display formatting.
+- Added `aircraftlist.json`, a sample snapshot of the receiver's raw JSON output, as a reference for the field names/units used by the live feed (e.g. `vrt` = vertical rate, `alts` = selected altitude).
 
 ## 2026-09-11
 
