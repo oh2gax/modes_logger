@@ -70,3 +70,32 @@
     height: 16px;
     display: block;
 }
+
+/* Small text-label nav buttons that sit next to the theme toggle (top-left
+   corner) - same flat box look, just auto-width to fit a short label
+   instead of an icon. Stack further buttons by adding --nav-N (1, 2, ...)
+   as a left-offset multiplier if more than one is ever needed. */
+.nav-button {
+    position: fixed;
+    top: 10px;
+    left: 44px;
+    z-index: 1000;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--icon-color);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: Arial, sans-serif;
+    font-size: 11px;
+    text-decoration: none;
+    box-sizing: border-box;
+}
+
+.nav-button:hover {
+    border-color: var(--icon-color);
+}

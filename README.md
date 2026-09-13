@@ -201,6 +201,9 @@ Open the site in a browser to use the three pages described below.
 
 ### Search page (`/`)
 
+A small "Live" button next to the light/dark toggle (top-left corner) jumps
+straight to the Live Flights page.
+
 The search form has four fields, all optional and combinable:
 
 - **Search by** — a dropdown choosing what "Search value" matches against:
@@ -250,6 +253,9 @@ checked and no watchlist matches were found, the column headers still show
 underneath instead of an empty table.
 
 ### Live Flights page (`/liveflights`)
+
+A matching "Search" button next to its own light/dark toggle jumps back to
+the Search page.
 
 A near-real-time view of everything currently being received (Registration,
 ICAO24, Callsign, Type, Squawk, Altitude, Selected Alt, Vert Rate, Track,
