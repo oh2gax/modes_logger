@@ -99,12 +99,22 @@
         th[data-sort]:hover {
             text-decoration: underline;
         }
+        .flagged-filter {
+            margin: 10px 0 4px 0;
+            font-size: 12px;
+        }
+        .flagged-filter label {
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
     <button id="theme-toggle" class="theme-toggle" title="Toggle light/dark mode" aria-label="Toggle light/dark mode"></button>
     <h1>MODE-S & ADS-B Live Flights</h1>
     <p class="subtitle" id="status">Loading…</p>
+    <div class="flagged-filter">
+        <label><input type="checkbox" id="flagged-only"> Show only flagged</label>
+    </div>
     <div class="table-wrapper">
     <table>
         <thead>
@@ -144,6 +154,12 @@
         // Default: lowest altitude on top when the page is first opened.
         let sortState = { key: 'altitude', dir: 'asc' };
         let currentData = [];
+        let flaggedOnly = false;
+
+        function applyFlaggedFilter(data) {
+            if (!flaggedOnly) return data;
+            return data.filter(ac => ac.alert === 'mil' || ac.alert === 'gov');
+        }
 
         function cell(value, className) {
             const td = document.createElement('td');
@@ -236,6 +252,25 @@
             });
         }
 
+        let lastUpdatedUtc = null;
+
+        function renderCurrent() {
+            renderRows(sortData(applyFlaggedFilter(currentData)));
+        }
+
+        function updateStatus() {
+            if (lastUpdatedUtc === null) return;
+            const status = document.getElementById('status');
+            if (flaggedOnly) {
+                const flaggedCount = applyFlaggedFilter(currentData).length;
+                status.textContent = flaggedCount
+                    ? flaggedCount + ' flagged aircraft — last updated ' + lastUpdatedUtc + ' UTC'
+                    : 'No flagged aircraft currently in range — last updated ' + lastUpdatedUtc + ' UTC';
+            } else {
+                status.textContent = currentData.length + ' aircraft — last updated ' + lastUpdatedUtc + ' UTC';
+            }
+        }
+
         async function refresh() {
             const status = document.getElementById('status');
             try {
@@ -243,8 +278,9 @@
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
                 currentData = data.aircraft;
-                renderRows(sortData(currentData));
-                status.textContent = data.count + ' aircraft — last updated ' + data.updated_utc + ' UTC';
+                lastUpdatedUtc = data.updated_utc;
+                renderCurrent();
+                updateStatus();
             } catch (err) {
                 status.textContent = 'Update failed: ' + err.message;
             }
@@ -260,8 +296,14 @@
                     sortState.dir = 'asc';
                 }
                 updateHeaderIndicators();
-                renderRows(sortData(currentData));
+                renderCurrent();
             });
+        });
+
+        document.getElementById('flagged-only').addEventListener('change', function () {
+            flaggedOnly = this.checked;
+            renderCurrent();
+            updateStatus();
         });
 
         updateHeaderIndicators();

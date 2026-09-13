@@ -149,7 +149,7 @@ Open the site in a browser to use the three pages described below.
 
 ### Search page (`/`)
 
-The search form has three fields, all optional and combinable:
+The search form has four fields, all optional and combinable:
 
 - **Search by** — a dropdown choosing what "Search value" matches against:
   `ICAO24` (the default), `Registration`, or `Callsign`. All three accept
@@ -171,6 +171,9 @@ The search form has three fields, all optional and combinable:
 - **Max last altitude** — filters to flights whose `LastAltitude` is
   strictly below the given value (in feet); leave it blank to not filter by
   altitude at all.
+- **Show only flagged** — a checkbox that restricts results to ICAO24s
+  currently on the military/government watchlist (see below), combinable
+  with any of the fields above.
 
 Leaving every field at its default (ICAO24 search with an empty value)
 returns the entire flight history, oldest first.
@@ -189,7 +192,10 @@ below). The table works reasonably well on a phone too: it scrolls within
 its own box (vertically, and horizontally on narrow screens) with the
 column header row locked in place and the Registration column frozen on
 the left, so you can keep track of which row is which while scrolling
-sideways through the rest of the columns.
+sideways through the rest of the columns. When "Show only flagged" was
+checked and no watchlist matches were found, the column headers still show
+(so you can see the search ran) with a "No flagged planes found" note
+underneath instead of an empty table.
 
 ### Live Flights page (`/liveflights`)
 
@@ -208,6 +214,13 @@ headers to sort by that column (click again to reverse direction); it opens
 sorted by altitude ascending (lowest first) by default, and keeps whatever
 sort you pick across each refresh. Blank values (e.g. no registration yet,
 altitude not decoded) always sort to the bottom regardless of direction.
+
+A "Show only flagged" checkbox sits above the top-left corner of the table
+(above the `#` column). Checking it filters the currently-displayed
+aircraft down to military/government watchlist matches instantly, entirely
+in the browser — no extra request, and no need to wait for the next
+auto-refresh — and the status line switches to "No flagged aircraft
+currently in range" if nothing matches.
 
 Altitude and Selected Alt are shown in standard aviation shorthand instead
 of raw feet: at or above a 5000ft transition altitude (hardcoded in

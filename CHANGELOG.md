@@ -17,6 +17,16 @@ under that day's heading.
 - Live Flights page: Altitude and Selected Alt now display in aviation shorthand instead of raw feet — a flight level (e.g. `F370`) at or above a 5000ft transition altitude, and below it, exact feet for Altitude (e.g. `2800`) or a QNH-style altitude for Selected Alt (e.g. `A030`). The raw Selected Alt value from the feed is rounded to the nearest 100ft first, since it's often reported slightly off a round number (e.g. `36992` instead of `37000`). Sorting on either column still uses the exact underlying value, unaffected by the display formatting.
 - Added `aircraftlist.json`, a sample snapshot of the receiver's raw JSON output, as a reference for the field names/units used by the live feed (e.g. `vrt` = vertical rate, `alts` = selected altitude).
 - Light/dark mode for the Query, Results, and Live Flights pages: a small square icon button in the top-left corner (a plain moon in light mode, a plain sun in dark mode) toggles between them; light mode is the default, and the chosen mode is remembered across pages and reloads via the browser's `localStorage`. Table colors, headers, borders, and the military/government alert-row highlighting all adapt to the active theme, and native controls (date picker, scrollbars) follow along too. The shared styling and toggle logic live in two new files, `static/theme.css` and `static/theme.js`, served by Flask's default static file handling and referenced from all three templates.
+- README expanded with more explanatory detail throughout (a "how it works"/design-rationale note on why only first/last is logged, and a new "Web UI" section documenting each page's fields and behavior in depth), and the military/government watchlist feature is now mentioned up front in the project's opening description.
+
+## 2026-09-13
+
+### Added
+- Search page: a "Show only flagged" checkbox below Max last altitude restricts results to ICAO24s on the military/government watchlist, combinable with the other search fields. When checked and nothing matches, the column headers still show with a "No flagged planes found" note underneath instead of an empty table.
+- Live Flights page: a matching "Show only flagged" checkbox, placed above the top-left corner of the table (above the `#` column). Filtering happens instantly in the browser against the already-loaded data — no extra request, no waiting for the next auto-refresh — and the status line switches to "No flagged aircraft currently in range" if nothing matches.
+
+### Fixed
+- Results page: the "No flagged planes found" message was inheriting the page title's negative top margin and overlapping the column header row; it now has its own spacing and sits clearly below the table.
 
 ## 2026-09-11
 

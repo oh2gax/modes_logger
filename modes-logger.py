@@ -518,6 +518,7 @@ def query():
     search_value = request.args.get("search_value", "").strip()
     date = request.args.get("date", "").strip()
     max_altitude = request.args.get("max_altitude", "").strip()
+    flagged_only = request.args.get("flagged_only", "").strip()
 
     conn_main = sqlite3.connect(DB_NAME)
     cur_main = conn_main.cursor()
@@ -556,6 +557,15 @@ def query():
     if max_altitude:
         sql += " AND LastAltitude < ?"
         params.append(max_altitude)
+    if flagged_only:
+        # ALERT_DB lives in memory (loaded from the alert-db CSVs), not in
+        # adsb_data.db, so filter by the matching ICAO24s directly - same
+        # pattern as the registration search above. An empty ALERT_DB (no
+        # CSVs loaded) falls back to a clause that matches nothing, rather
+        # than accidentally returning everything.
+        alert_icaos = list(ALERT_DB.keys()) or ["__NONE__"]
+        sql += f" AND ICAO24 IN ({','.join('?' for _ in alert_icaos)})"
+        params.extend(alert_icaos)
 
     # ✅ Oldest first (original behavior)
     sql += " ORDER BY LastEpoch ASC"
@@ -578,7 +588,10 @@ def query():
 
     conn_main.close()
     conn_base.close()
-    return render_template("results.html", results=results, alert_lookup=alert_lookup)
+    return render_template(
+        "results.html", results=results, alert_lookup=alert_lookup,
+        flagged_only=bool(flagged_only)
+    )
 
 @app.route("/liveflights")
 def liveflights():
