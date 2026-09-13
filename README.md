@@ -222,6 +222,15 @@ in the browser — no extra request, and no need to wait for the next
 auto-refresh — and the status line switches to "No flagged aircraft
 currently in range" if nothing matches.
 
+Since a flagged-only view typically has just a handful of aircraft on
+screen, checking it also switches the data rows into a bigger "flight
+strip" style: roughly 1.7x the normal font size and doubled row padding,
+so the few tracked aircraft are easier to scan at a glance. Only the data
+cells change size — the column header row, the sticky Registration column,
+and the military/government row coloring all stay exactly as they are in
+the normal view. Unchecking the box instantly reverts both the filter and
+the row size together.
+
 Altitude and Selected Alt are shown in standard aviation shorthand instead
 of raw feet: at or above a 5000ft transition altitude (hardcoded in
 `liveflights.html`) as a flight level, e.g. `F370` for 37000ft; below it,

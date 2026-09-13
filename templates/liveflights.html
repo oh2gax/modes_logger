@@ -106,6 +106,14 @@
         .flagged-filter label {
             cursor: pointer;
         }
+        /* "Flight strip" style: bigger, easier-to-scan rows for the small
+           number of aircraft typically shown when "Show only flagged" is
+           on. Column headers and row coloring are untouched - only the
+           data cells get bigger. */
+        table.big-rows tbody td {
+            font-size: 20px;
+            padding: 11px 10px;
+        }
     </style>
 </head>
 <body>
@@ -302,6 +310,7 @@
 
         document.getElementById('flagged-only').addEventListener('change', function () {
             flaggedOnly = this.checked;
+            document.querySelector('table').classList.toggle('big-rows', flaggedOnly);
             renderCurrent();
             updateStatus();
         });

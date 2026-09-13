@@ -9,6 +9,7 @@ under that day's heading.
 ### Added
 - Search page: a "Show only flagged" checkbox below Max last altitude restricts results to ICAO24s on the military/government watchlist, combinable with the other search fields. When checked and nothing matches, the column headers still show with a "No flagged planes found" note underneath instead of an empty table.
 - Live Flights page: a matching "Show only flagged" checkbox, placed above the top-left corner of the table (above the `#` column). Filtering happens instantly in the browser against the already-loaded data — no extra request, no waiting for the next auto-refresh — and the status line switches to "No flagged aircraft currently in range" if nothing matches.
+- Live Flights page: checking "Show only flagged" now also switches the data rows into a bigger "flight strip" style (~1.7x font size, roughly doubled row padding), since a flagged-only view typically shows just a few aircraft and benefits from being easier to scan at a glance. Only the data cells resize — the column header row, sticky Registration column, and military/government row coloring are unchanged. Unchecking the box reverts both the filter and the row size together instantly.
 
 ### Fixed
 - Results page: the "No flagged planes found" message was inheriting the page title's negative top margin and overlapping the column header row; it now has its own spacing and sits clearly below the table.
