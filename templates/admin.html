@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script>
+        // Applied before the stylesheet loads, so the page never flashes
+        // the wrong theme on load.
+        (function () {
+            try {
+                var t = localStorage.getItem('modes_logger_theme') || 'light';
+                document.documentElement.setAttribute('data-theme', t);
+            } catch (e) { /* ignore */ }
+        })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Watchlist Admin</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='theme.css') }}">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+            font-size: 12px;
+        }
+        h1 {
+            text-align: center;
+            color: var(--header-bg);
+        }
+        .subtitle {
+            text-align: center;
+            font-size: 11px;
+            color: var(--subtitle-text);
+            margin-top: -8px;
+        }
+        .no-results {
+            text-align: center;
+            font-size: 12px;
+            color: var(--subtitle-text);
+        }
+        .from-basestation {
+            color: var(--subtitle-text);
+            font-style: italic;
+        }
+        .panel {
+            max-width: 720px;
+            margin: 20px auto;
+            padding: 14px 16px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+        }
+        .flash {
+            max-width: 720px;
+            margin: 16px auto 0 auto;
+            padding: 8px 12px;
+            border: 1px solid var(--link-text);
+            border-radius: 6px;
+            font-size: 12px;
+        }
+        .flash p {
+            margin: 2px 0;
+        }
+        .login-form, .logout-form {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .login-form input {
+            padding: 5px 7px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--bg);
+            color: var(--text);
+        }
+        button, .login-form button, .logout-form button {
+            padding: 5px 12px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--header-bg);
+            color: var(--header-text);
+            cursor: pointer;
+            font-size: 12px;
+        }
+        button:hover {
+            opacity: 0.9;
+        }
+        .table-wrapper {
+            overflow: auto;
+            margin: 20px auto;
+            max-width: 900px;
+            max-height: calc(100vh - 140px);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 4px 6px;
+            text-align: center;
+            border: 1px solid var(--border);
+        }
+        th {
+            background-color: var(--header-bg);
+            color: var(--header-text);
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+        tr:nth-child(even) {
+            background-color: var(--row-alt-bg);
+        }
+        tr:hover {
+            background-color: var(--row-hover-bg);
+        }
+        .numbering {
+            width: 40px;
+        }
+        .actions-cell {
+            white-space: nowrap;
+        }
+        .actions-cell button {
+            margin: 0 2px;
+        }
+        .entry-form {
+            max-width: 720px;
+            margin: 20px auto;
+        }
+        .form-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+        .form-row label {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            flex: 1 1 150px;
+        }
+        .form-row input {
+            padding: 5px 7px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--bg);
+            color: var(--text);
+        }
+        details {
+            margin: 8px 0;
+        }
+        summary {
+            cursor: pointer;
+            color: var(--link-text);
+        }
+        .apply-form {
+            max-width: 720px;
+            margin: 10px auto 0 auto;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <button id="theme-toggle" class="theme-toggle" title="Toggle light/dark mode" aria-label="Toggle light/dark mode"></button>
+    <h1>Watchlist Admin</h1>
+    <p class="subtitle">Manage your own flagged-aircraft entries (plane-alert-user.csv)</p>
+
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+    <div class="flash">
+        {% for m in messages %}<p>{{ m }}</p>{% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+
+    <div class="panel">
+        {% if not logged_in %}
+            {% if auth_configured %}
+            <form method="post" action="{{ url_for('admin_login') }}" class="login-form">
+                <input type="text" name="username" placeholder="Username" autocomplete="username" required>
+                <input type="password" name="password" placeholder="Password" autocomplete="current-password" required>
+                <button type="submit">Log in</button>
+            </form>
+            {% else %}
+            <p class="no-results">Admin login isn't set up yet — create a <code>dbauth.txt</code> file (one line: <code>username:passwd</code>) in the modes_logger folder to enable editing.</p>
+            {% endif %}
+        {% else %}
+            <form method="post" action="{{ url_for('admin_logout') }}" class="logout-form">
+                <span>Logged in</span>
+                <button type="submit">Log out</button>
+            </form>
+        {% endif %}
+    </div>
+
+    <p class="no-results">Italic cells are looked up from <code>BaseStation.sqb</code> for planes already seen before — not stored in <code>plane-alert-user.csv</code>.</p>
+    <div class="table-wrapper">
+    <table>
+        <thead>
+            <tr>
+                <th class="numbering">#</th>
+                <th>ICAO24</th>
+                <th>Registration</th>
+                <th>Operator</th>
+                <th>Type</th>
+                {% if logged_in %}<th>Actions</th>{% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            {% set e = row.raw %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td>{{ e['$ICAO'] }}</td>
+                <td class="{{ 'from-basestation' if row.reg_from_basestation else '' }}"
+                    {% if row.reg_from_basestation %}title="Looked up from BaseStation.sqb — not stored in plane-alert-user.csv"{% endif %}>{{ row.display_registration }}</td>
+                <td>{{ e['$Operator'] }}</td>
+                <td class="{{ 'from-basestation' if row.type_from_basestation else '' }}"
+                    {% if row.type_from_basestation %}title="Looked up from BaseStation.sqb — not stored in plane-alert-user.csv"{% endif %}>{{ row.display_type }}</td>
+                {% if logged_in %}
+                <td class="actions-cell">
+                    <button type="button" class="edit-btn"
+                        data-icao="{{ e['$ICAO'] }}"
+                        data-registration="{{ e['$Registration'] }}"
+                        data-operator="{{ e['$Operator'] }}"
+                        data-type="{{ e['$Type'] }}"
+                        data-icao_type="{{ e['$ICAO Type'] }}"
+                        data-cmpg="{{ e['#CMPG'] }}"
+                        data-tag1="{{ e['$Tag 1'] }}"
+                        data-tag2="{{ e['$#Tag 2'] }}"
+                        data-tag3="{{ e['$#Tag 3'] }}"
+                        data-category="{{ e['Category'] }}"
+                        data-link="{{ e['$#Link'] }}">Edit</button>
+                    <form method="post" action="{{ url_for('admin_remove') }}" class="inline-form"
+                          onsubmit="return confirm('Remove {{ e['$ICAO'] }} from the watchlist?');" style="display:inline;">
+                        <input type="hidden" name="icao" value="{{ e['$ICAO'] }}">
+                        <button type="submit">Remove</button>
+                    </form>
+                </td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+            {% if not rows %}
+            <tr><td colspan="{{ 6 if logged_in else 5 }}" class="no-results">No watchlist entries yet.</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+    </div>
+
+    {% if logged_in %}
+    <form method="post" action="{{ url_for('admin_save') }}" id="entry-form" class="entry-form">
+        <div class="form-row">
+            <label>ICAO24 <input type="text" id="icao" name="icao" maxlength="6" required placeholder="e.g. 4CA1B2"></label>
+            <label>Registration <input type="text" id="registration" name="registration" placeholder="e.g. OH-ABC"></label>
+            <label>Type <input type="text" id="type" name="type" placeholder="e.g. Boeing 737"></label>
+        </div>
+        <details>
+            <summary>More fields (optional)</summary>
+            <div class="form-row">
+                <label>Operator <input type="text" id="operator" name="operator"></label>
+                <label>ICAO Type <input type="text" id="icao_type" name="icao_type" placeholder="e.g. B738"></label>
+                <label>Category <input type="text" id="category" name="category"></label>
+            </div>
+            <div class="form-row">
+                <label>CMPG <input type="text" id="cmpg" name="cmpg"></label>
+                <label>Tag 1 <input type="text" id="tag1" name="tag1"></label>
+                <label>Tag 2 <input type="text" id="tag2" name="tag2"></label>
+                <label>Tag 3 <input type="text" id="tag3" name="tag3"></label>
+            </div>
+            <div class="form-row">
+                <label>Link <input type="text" id="link" name="link"></label>
+            </div>
+        </details>
+        <button type="submit">Save entry</button>
+    </form>
+
+    <form method="post" action="{{ url_for('admin_reload') }}" class="apply-form">
+        <button type="submit">Apply (reload watchlist now)</button>
+    </form>
+    {% endif %}
+
+    <script>
+        document.querySelectorAll('.edit-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var fields = ['icao', 'registration', 'operator', 'type', 'icao_type', 'cmpg', 'tag1', 'tag2', 'tag3', 'category', 'link'];
+                fields.forEach(function (f) {
+                    var el = document.getElementById(f);
+                    if (el) el.value = btn.dataset[f] || '';
+                });
+                var form = document.getElementById('entry-form');
+                if (form) form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                var icaoEl = document.getElementById('icao');
+                if (icaoEl) icaoEl.focus();
+            });
+        });
+    </script>
+    <script src="{{ url_for('static', filename='theme.js') }}"></script>
+</body>
+</html>

@@ -16,6 +16,7 @@
     --row-hover-bg: #ddd;
     --mil-bg: #cce5ff;
     --gov-bg: #d9f2d9;
+    --user-bg: #fdf0c4;
     --subtitle-text: #666;
     --link-text: #004f7c;
     /* Toggle button icon: a plain dark blue moon in light mode. */
@@ -33,6 +34,7 @@
     --row-hover-bg: #2b333a;
     --mil-bg: #163a5c;
     --gov-bg: #17402a;
+    --user-bg: #4a3d14;
     --subtitle-text: #9aa4ad;
     --link-text: #6cb6e8;
     /* Toggle button icon: a plain white/light sun in dark mode. */

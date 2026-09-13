@@ -6,6 +6,10 @@
 *.sqb-wal
 *.sqb-shm
 
+# Admin login credentials for the /admin watchlist page — plaintext
+# username:password, never committed
+dbauth.txt
+
 # Editor / OS cruft
 *.swp
 *.swo

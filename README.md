@@ -26,6 +26,10 @@ At a glance, modes_logger currently gives you:
   [plane-alert-db](https://github.com/sdr-enthusiasts/plane-alert-db) CSVs
   are highlighted on both the Results and Live Flights pages, so a tracked
   aircraft stands out immediately instead of scrolling past it unnoticed.
+- **Your own watchlist** — a password-protected admin page (`/admin`) for
+  adding any aircraft you personally want to keep an eye on (e.g. a friend's
+  plane), highlighted the same way as the official lists but kept
+  completely separate from them.
 - **Light/dark mode** on every page, remembered across visits.
 
 ## How it works
@@ -109,6 +113,54 @@ Both files are optional: a missing one is logged and skipped rather than
 crashing the app. Since the project only reads them at startup, update the
 CSVs and restart `modes-logger.py` to pick up changes.
 
+## Your own watchlist (admin page)
+
+Besides the curated military/government lists above, you can keep your own
+personal watchlist through the admin page at `/admin` — for aircraft that
+aren't on any official list but that you still want flagged, like a friend's
+plane. It's backed by a separate `alertdb/plane-alert-user.csv` file, using
+the same 11-column layout as the upstream CSVs, but in practice you'll
+usually only fill in the ICAO24 (and maybe registration/type) — everything
+else is optional reference detail.
+
+Editing is gated behind a simple login: create a `dbauth.txt` file in the
+modes_logger folder (next to `modes-logger.py`) with one line,
+`username:passwd`. It's read fresh on every login attempt, so changing the
+credentials takes effect immediately without a restart, and it's excluded
+from the repo via `.gitignore` since it's a plaintext credential file.
+Without it, `/admin` still shows the current watchlist, just read-only.
+
+Logged in, you get a table of current entries with Edit/Remove buttons and a
+small add/edit form (ICAO24, Registration, and Type up front; the rest of
+the CSV's fields tucked under an optional "More fields" section). Two
+things are deliberately different from the military/government lists:
+
+- **Entries here never get written into `BaseStation.sqb`.** That sync is
+  reserved for the curated upstream lists, since this personal list can
+  include entirely ordinary aircraft you just want to watch — it would be
+  wrong to treat "planes I'm personally curious about" as an authoritative
+  registration/type source the way the vetted watchlists are.
+- **Changes don't take effect immediately** — saving, editing, or removing
+  an entry updates `plane-alert-user.csv` on disk right away, but flagging
+  only picks it up once you click the page's **Apply** button, which
+  reloads all three watchlists (government/military/user) and re-syncs the
+  government/military ones into `BaseStation.sqb`, exactly like what
+  happens at startup. This is also how a manual edit to the CSV in a text
+  editor gets picked up — no restart needed either way.
+
+If you only type in an ICAO24 for a plane that's already been logged before
+(e.g. you know its tail number in real life but the app hasn't stored it
+yet), the admin table will still show its Registration/Type — looked up
+from `BaseStation.sqb` on the fly and shown in italics with a tooltip
+explaining where it came from. That lookup is display-only: it's never
+written into `plane-alert-user.csv`, so if you later remove the entry to
+stop watching that plane, nothing about it is left behind.
+
+Matches from this list are highlighted in light amber on the Results and
+Live Flights pages (military/government stay light blue/light green) and
+are included in "Show only flagged" on both pages alongside the official
+watchlist matches.
+
 ## Requirements
 
 - Python 3.8+
@@ -172,8 +224,8 @@ The search form has four fields, all optional and combinable:
   strictly below the given value (in feet); leave it blank to not filter by
   altitude at all.
 - **Show only flagged** — a checkbox that restricts results to ICAO24s
-  currently on the military/government watchlist (see below), combinable
-  with any of the fields above.
+  currently on the military/government watchlist or your own watchlist
+  (see below), combinable with any of the fields above.
 
 Leaving every field at its default (ICAO24 search with an empty value)
 returns the entire flight history, oldest first.
@@ -186,9 +238,9 @@ at query time (shown as "Not Found" when that ICAO24 isn't in there yet).
 Each row shows the full First/Last pair for callsign, squawk, position,
 altitude, track, speed, and timestamp (all times UTC — noted under the
 page title) — so you can see both when a flight was first picked up and
-its most recent known state in one place. A row is highlighted light blue
-or light green if that ICAO24 is on the military/government watchlist (see
-below). The table works reasonably well on a phone too: it scrolls within
+its most recent known state in one place. A row is highlighted light blue,
+light green, or light amber if that ICAO24 is on the military, government,
+or your own watchlist respectively (see below). The table works reasonably well on a phone too: it scrolls within
 its own box (vertically, and horizontally on narrow screens) with the
 column header row locked in place and the Registration column frozen on
 the left, so you can keep track of which row is which while scrolling
@@ -217,9 +269,9 @@ altitude not decoded) always sort to the bottom regardless of direction.
 
 A "Show only flagged" checkbox sits above the top-left corner of the table
 (above the `#` column). Checking it filters the currently-displayed
-aircraft down to military/government watchlist matches instantly, entirely
-in the browser — no extra request, and no need to wait for the next
-auto-refresh — and the status line switches to "No flagged aircraft
+aircraft down to military/government/your-own-watchlist matches instantly,
+entirely in the browser — no extra request, and no need to wait for the
+next auto-refresh — and the status line switches to "No flagged aircraft
 currently in range" if nothing matches.
 
 Since a flagged-only view typically has just a handful of aircraft on
@@ -243,9 +295,20 @@ nearest 100ft before display; sorting still uses the exact underlying
 value, unaffected by the rounding/formatting. Vert Rate is the vertical
 rate in feet per minute, straight from the feed.
 
+### Admin page (`/admin`)
+
+Manage your own watchlist (see "Your own watchlist" above). Not linked from
+any other page — open it directly by URL. Logged out, it shows the current
+`plane-alert-user.csv` entries read-only; log in with the credentials from
+`dbauth.txt` to add, edit, or remove entries, and to use the **Apply**
+button that reloads all watchlists for flagging purposes. An entry that's
+missing Registration/Type but matches an aircraft already known in
+`BaseStation.sqb` shows those values in italics for reference — looked up
+on the fly, never written into the CSV itself.
+
 ### Light/dark mode
 
-All three pages have a light/dark mode toggle: a small square icon button
+All four pages have a light/dark mode toggle: a small square icon button
 in the top-left corner, showing a plain moon in light mode or a plain sun
 in dark mode (click to switch). Light mode is the default; your choice is
 remembered in the browser (via `localStorage`) and applied instantly on
@@ -253,7 +316,7 @@ every page, with no page reload needed and no flash of the wrong theme on
 load. The shared styling and toggle logic live in `static/theme.css` and
 `static/theme.js`, served by Flask's default static file handling, and
 cover the table colors, headers, borders, and alert-row highlighting on
-all three pages.
+all of them.
 
 ## Configuration
 
@@ -271,6 +334,8 @@ All tunable settings live as constants near the top of `modes-logger.py`:
 | `POSITION_FILL_WINDOW_SECONDS` | `60` | How long after true first contact a still-blank `FirstLat`/`FirstLon`/`FirstAltitude`/`FirstTrack`/`FirstSpeed` can be backfilled |
 | `ALERTDB_DIR` | `<script dir>/alertdb` | Folder holding the optional military/government watchlist CSVs |
 | `ALERT_GOV_CSV` / `ALERT_MIL_CSV` | `plane-alert-gov.csv` / `plane-alert-mil.csv` in `ALERTDB_DIR` | The two watchlist files, from [plane-alert-db](https://github.com/sdr-enthusiasts/plane-alert-db) |
+| `ALERT_USER_CSV` | `plane-alert-user.csv` in `ALERTDB_DIR` | Your own watchlist, managed from `/admin` |
+| `DBAUTH_PATH` | `<script dir>/dbauth.txt` | Admin page login credentials (one line, `username:passwd`) |
 | `LIVE_PAGE_REFRESH_SECONDS` | `10` | How often `/liveflights` polls `/api/liveflights` for fresh data |
 
 ## Database schema
@@ -283,16 +348,17 @@ All tunable settings live as constants near the top of `modes-logger.py`:
 - `SeenCount` — capped at 5, just a rough "how many updates" indicator
 - `current_flights` — internal pointer table (ICAO24 → active `aircraft` row, plus `first_epoch`, the true first-contact time used for the backfill windows) used to route incoming updates to the right row
 
-**`BaseStation.sqb` → `Aircraft` table** — shared registration/type lookup, keyed by `ModeS` (= ICAO24), auto-populated by modes-logger.py (from the live feed, and at startup from the alert-db CSVs — see Military & government aircraft alerts above) and readable by any other ADS-B tool that expects this standard file.
+**`BaseStation.sqb` → `Aircraft` table** — shared registration/type lookup, keyed by `ModeS` (= ICAO24), auto-populated by modes-logger.py (from the live feed, and at startup/Apply from the government/military alert-db CSVs — see Military & government aircraft alerts above; entries from your own watchlist are deliberately excluded from this — see Your own watchlist above) and readable by any other ADS-B tool that expects this standard file.
 
 ## Repo layout
 
 This repo intentionally contains only what modes_logger itself needs to run:
 
 - [`modes-logger.py`](modes-logger.py) — the whole application (poller + Flask web UI)
-- [`templates/`](templates/) — the Jinja templates for the web UI (search form, results table, live flights)
-- [`static/`](static/) — shared front-end assets (currently just the light/dark theme CSS/JS used by all three pages)
-- [`alertdb/`](alertdb/) — the optional `plane-alert-gov.csv`/`plane-alert-mil.csv` watchlist files (see Military & government aircraft alerts above)
+- [`templates/`](templates/) — the Jinja templates for the web UI (search form, results table, live flights, admin)
+- [`static/`](static/) — shared front-end assets (currently just the light/dark theme CSS/JS used by all four pages)
+- [`alertdb/`](alertdb/) — the `plane-alert-gov.csv`/`plane-alert-mil.csv` watchlist files (see Military & government aircraft alerts above) plus your own `plane-alert-user.csv` (see Your own watchlist above)
+- `dbauth.txt` — admin page login credentials (not committed — see `.gitignore`; you create this yourself, see Your own watchlist above)
 - `requirements.txt` — the one dependency (Flask)
 - `adsb_data.db`, `BaseStation.sqb` — local SQLite data files, created/updated at runtime (not meant to be committed — see `.gitignore`)
 

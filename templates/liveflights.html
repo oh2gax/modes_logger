@@ -64,6 +64,9 @@
         tr.gov-alert {
             background-color: var(--gov-bg);
         }
+        tr.user-alert {
+            background-color: var(--user-bg);
+        }
         tr:hover {
             background-color: var(--row-hover-bg);
         }
@@ -84,6 +87,9 @@
         }
         tr.gov-alert .sticky-col {
             background-color: var(--gov-bg);
+        }
+        tr.user-alert .sticky-col {
+            background-color: var(--user-bg);
         }
         tr:hover .sticky-col {
             background-color: var(--row-hover-bg);
@@ -166,7 +172,7 @@
 
         function applyFlaggedFilter(data) {
             if (!flaggedOnly) return data;
-            return data.filter(ac => ac.alert === 'mil' || ac.alert === 'gov');
+            return data.filter(ac => ac.alert === 'mil' || ac.alert === 'gov' || ac.alert === 'user');
         }
 
         function cell(value, className) {
@@ -242,6 +248,8 @@
                     tr.className = 'mil-alert';
                 } else if (ac.alert === 'gov') {
                     tr.className = 'gov-alert';
+                } else if (ac.alert === 'user') {
+                    tr.className = 'user-alert';
                 }
                 tr.appendChild(cell(i + 1));
                 tr.appendChild(cell(ac.registration, 'sticky-col'));

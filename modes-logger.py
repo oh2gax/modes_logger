@@ -1,12 +1,15 @@
 import csv
+import hmac
 import json
 import os
+import secrets
 import socket
 import sqlite3
 import threading
 import time
 from datetime import datetime
-from flask import Flask, jsonify, request, render_template
+from functools import wraps
+from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
 
 # ---------------- Configuration ----------------
 ADSB_JSON_HOST = "127.0.0.1"
@@ -48,13 +51,31 @@ ALERTDB_DIR = os.path.join(BASE_DIR, "alertdb")
 ALERT_GOV_CSV = os.path.join(ALERTDB_DIR, "plane-alert-gov.csv")
 ALERT_MIL_CSV = os.path.join(ALERTDB_DIR, "plane-alert-mil.csv")
 
+# User-maintained watchlist, edited from the /admin page (see below). Same
+# 11-column layout as the upstream gov/mil CSVs, so it can also be opened
+# and hand-edited in a spreadsheet - only $ICAO is required in practice.
+ALERT_USER_CSV = os.path.join(ALERTDB_DIR, "plane-alert-user.csv")
+USER_CSV_FIELDS = [
+    "$ICAO", "$Registration", "$Operator", "$Type", "$ICAO Type", "#CMPG",
+    "$Tag 1", "$#Tag 2", "$#Tag 3", "Category", "$#Link",
+]
+
+# Simple username:password gate for the /admin page. One line,
+# "username:passwd", in the modes_logger root. Read fresh on every login
+# attempt (never cached), so editing this file takes effect immediately.
+DBAUTH_PATH = os.path.join(BASE_DIR, "dbauth.txt")
+
 LIVE_PAGE_REFRESH_SECONDS = 10   # how often liveflights.html polls /api/liveflights
 
 # ---------------- Shared in-memory state ----------------
-# ALERT_DB: ICAO24 -> {"category": "mil"/"gov", "registration":, "operator":, "type":}
-# populated once at startup by load_alert_db(). Read-only after that, from
-# both the poller thread and Flask request threads, so no lock is needed.
+# ALERT_DB: ICAO24 -> {"category": "mil"/"gov"/"user", "registration":, "operator":, "type":}
+# populated at startup by load_alert_db(), and can also be reloaded on
+# demand from the /admin page's Apply button after the user CSV is edited -
+# so, unlike before the admin page existed, this is no longer purely
+# read-only after startup. ALERT_DB_LOCK guards the reassignment against
+# the poller thread and other request threads reading it mid-reload.
 ALERT_DB = {}
+ALERT_DB_LOCK = threading.Lock()
 
 # LIVE_SNAPSHOT: ICAO24 -> latest raw fields from the most recent successful
 # poll, entirely separate from adsb_data.db - it exists only to answer "what
@@ -222,13 +243,14 @@ def init_basestation_db():
 
 # ---------------- Alert DB (military/government watchlist) ----------------
 def load_alert_db():
-    """Load the plane-alert-db gov/mil CSVs into the in-memory ALERT_DB dict.
-    Each file is optional - a missing or unreadable one is logged and
-    skipped rather than crashing the app, since these are manually-supplied
+    """Load the plane-alert-db gov/mil CSVs, plus the user-maintained
+    plane-alert-user.csv watchlist, into the in-memory ALERT_DB dict. Each
+    file is optional - a missing or unreadable one is logged and skipped
+    rather than crashing the app, since these are manually-supplied
     reference files, not required for modes_logger to run."""
     global ALERT_DB
     alert_db = {}
-    for path, category in ((ALERT_GOV_CSV, "gov"), (ALERT_MIL_CSV, "mil")):
+    for path, category in ((ALERT_GOV_CSV, "gov"), (ALERT_MIL_CSV, "mil"), (ALERT_USER_CSV, "user")):
         if not os.path.exists(path):
             print(f"Alert DB: {path} not found, skipping ({category})")
             continue
@@ -255,24 +277,111 @@ def load_alert_db():
             print(f"Alert DB: loaded {count} {category} entries from {path}")
         except Exception as e:
             print(f"Alert DB: failed to load {path}: {e}")
-    ALERT_DB = alert_db
+    with ALERT_DB_LOCK:
+        ALERT_DB = alert_db
 
 def sync_alert_db_to_basestation():
-    """Push alert-db registrations/types into BaseStation.sqb at startup.
-    These manually-curated lists are treated as more trustworthy than
+    """Push gov/mil alert-db registrations/types into BaseStation.sqb at
+    startup (and again whenever /admin's Apply button reloads the alert
+    DBs). These manually-curated lists are treated as more trustworthy than
     whatever the live feed happens to report, so they're written
     unconditionally via the same upsert the live feed itself uses - the live
     feed can still update an entry again later if it reports something
-    different for that ICAO24 (see README for this trade-off)."""
+    different for that ICAO24 (see README for this trade-off).
+
+    User-defined watchlist entries ("category": "user") are deliberately
+    skipped here - that list can include perfectly ordinary aircraft the
+    user just wants to keep an eye on, so unlike the curated mil/gov lists,
+    it must never overwrite BaseStation.sqb."""
     if not ALERT_DB:
         return
     conn_base = sqlite3.connect(SQB_DB_PATH)
     try:
         for icao24, info in ALERT_DB.items():
+            if info["category"] == "user":
+                continue
             upsert_basestation_registration(conn_base, icao24, info["registration"], info["type"])
         conn_base.commit()
     finally:
         conn_base.close()
+
+# ---------------- Admin: user watchlist + login ----------------
+def read_dbauth():
+    """Read the admin username/password from dbauth.txt (one line,
+    "username:passwd"). Returns (username, password), or None if the file
+    is missing or malformed. Read fresh on every login attempt - never
+    cached - so editing the file takes effect immediately, no restart."""
+    if not os.path.exists(DBAUTH_PATH):
+        return None
+    try:
+        with open(DBAUTH_PATH, "r", encoding="utf-8") as f:
+            line = f.readline().strip()
+        if ":" not in line:
+            return None
+        username, password = line.split(":", 1)
+        return (username, password)
+    except Exception as e:
+        print(f"dbauth.txt: failed to read: {e}")
+        return None
+
+def check_admin_credentials(username, password):
+    creds = read_dbauth()
+    if not creds:
+        return False
+    real_username, real_password = creds
+    # compare_digest avoids leaking timing info from the password compare;
+    # the username compare can short-circuit normally since only the
+    # password half is meant to be secret.
+    return username == real_username and hmac.compare_digest(password, real_password)
+
+def login_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("admin_logged_in"):
+            flash("Please log in first.")
+            return redirect(url_for("admin"))
+        return view(*args, **kwargs)
+    return wrapped
+
+def ensure_user_csv():
+    """Create alertdb/plane-alert-user.csv with just the header row if it
+    doesn't already exist, so the admin page always has a file to read."""
+    if os.path.exists(ALERT_USER_CSV):
+        return
+    os.makedirs(ALERTDB_DIR, exist_ok=True)
+    with open(ALERT_USER_CSV, "w", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerow(USER_CSV_FIELDS)
+
+def read_user_entries():
+    """Read alertdb/plane-alert-user.csv as a list of dicts, in file order."""
+    ensure_user_csv()
+    with open(ALERT_USER_CSV, newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+def lookup_basestation(cur_base, icao24):
+    """Look up Registration/ICAOTypeCode for one ICAO24 from an existing
+    BaseStation.sqb cursor. Returns (registration, icao_type), each None
+    if unknown. Used by /admin to show a friend's-plane-style watchlist
+    entry's real registration/type even when the user only typed in an
+    ICAO24 - the same data the Results/Live Flights pages already show
+    for that aircraft independently of the watchlist itself."""
+    cur_base.execute("SELECT Registration, ICAOTypeCode FROM Aircraft WHERE ModeS = ?", (icao24,))
+    row = cur_base.fetchone()
+    if not row:
+        return (None, None)
+    return (row[0] or None, row[1] or None)
+
+def write_user_entries(entries):
+    """Rewrite plane-alert-user.csv from a list of dicts, atomically (write
+    to a temp file, then replace it) so a crash mid-write can't corrupt it."""
+    ensure_user_csv()
+    tmp_path = ALERT_USER_CSV + ".tmp"
+    with open(tmp_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=USER_CSV_FIELDS)
+        writer.writeheader()
+        for row in entries:
+            writer.writerow({k: row.get(k, "") for k in USER_CSV_FIELDS})
+    os.replace(tmp_path, ALERT_USER_CSV)
 
 # ---------------- Fetch & Process ----------------
 def fetch_json_snapshot(host, port, timeout=SOCKET_TIMEOUT):
@@ -507,6 +616,11 @@ def process_aircraft_list(aircraft_list):
 
 # ---------------- Web ----------------
 app = Flask(__name__)
+# Random per-run secret key for the /admin login session cookie. It's
+# regenerated on every restart, so an admin session doesn't survive one -
+# an acceptable trade-off for a single-operator local tool, and simpler
+# than adding yet another secret file to manage.
+app.secret_key = secrets.token_hex(32)
 
 @app.route("/")
 def home():
@@ -642,10 +756,115 @@ def api_liveflights():
         "updated_utc": datetime.utcnow().strftime("%H:%M:%S"),
     })
 
+@app.route("/admin")
+def admin():
+    entries = read_user_entries()
+
+    # Display only - never written back to plane-alert-user.csv. An entry
+    # that only specifies an ICAO24 (or leaves Registration/Type blank)
+    # gets those fields filled in from BaseStation.sqb when that aircraft
+    # has already been logged, e.g. a friend's plane that's flown past
+    # before. That way "just watch this ICAO24" still shows something
+    # meaningful here, and if the entry is later removed, nothing about
+    # it was ever added to the CSV beyond what was actually typed in.
+    conn_base = sqlite3.connect(SQB_DB_PATH)
+    rows = []
+    try:
+        cur_base = conn_base.cursor()
+        for e in entries:
+            reg_lookup = type_lookup = None
+            if not e.get("$Registration") or not (e.get("$Type") or e.get("$ICAO Type")):
+                reg_lookup, type_lookup = lookup_basestation(cur_base, e.get("$ICAO", ""))
+            rows.append({
+                "raw": e,
+                "display_registration": e.get("$Registration") or reg_lookup or "",
+                "display_type": e.get("$Type") or e.get("$ICAO Type") or type_lookup or "",
+                "reg_from_basestation": bool(reg_lookup) and not e.get("$Registration"),
+                "type_from_basestation": bool(type_lookup) and not (e.get("$Type") or e.get("$ICAO Type")),
+            })
+    finally:
+        conn_base.close()
+
+    return render_template(
+        "admin.html",
+        rows=rows,
+        logged_in=bool(session.get("admin_logged_in")),
+        auth_configured=os.path.exists(DBAUTH_PATH),
+    )
+
+@app.route("/admin/login", methods=["POST"])
+def admin_login():
+    username = request.form.get("username", "")
+    password = request.form.get("password", "")
+    if check_admin_credentials(username, password):
+        session["admin_logged_in"] = True
+        flash("Logged in.")
+    else:
+        flash("Incorrect username or password.")
+    return redirect(url_for("admin"))
+
+@app.route("/admin/logout", methods=["POST"])
+def admin_logout():
+    session.pop("admin_logged_in", None)
+    flash("Logged out.")
+    return redirect(url_for("admin"))
+
+@app.route("/admin/save", methods=["POST"])
+@login_required
+def admin_save():
+    icao = request.form.get("icao", "").strip().upper().zfill(6)
+    if not icao or len(icao) != 6:
+        flash("ICAO24 is required and must be a valid hex code.")
+        return redirect(url_for("admin"))
+
+    row = {
+        "$ICAO": icao,
+        "$Registration": request.form.get("registration", "").strip(),
+        "$Operator": request.form.get("operator", "").strip(),
+        "$Type": request.form.get("type", "").strip(),
+        "$ICAO Type": request.form.get("icao_type", "").strip(),
+        "#CMPG": request.form.get("cmpg", "").strip(),
+        "$Tag 1": request.form.get("tag1", "").strip(),
+        "$#Tag 2": request.form.get("tag2", "").strip(),
+        "$#Tag 3": request.form.get("tag3", "").strip(),
+        "Category": request.form.get("category", "").strip(),
+        "$#Link": request.form.get("link", "").strip(),
+    }
+
+    entries = read_user_entries()
+    for i, existing in enumerate(entries):
+        if (existing.get("$ICAO") or "").strip().upper().zfill(6) == icao:
+            entries[i] = row
+            break
+    else:
+        entries.append(row)
+    write_user_entries(entries)
+    flash(f"Saved {icao}. Click Apply to make it active for flagging.")
+    return redirect(url_for("admin"))
+
+@app.route("/admin/remove", methods=["POST"])
+@login_required
+def admin_remove():
+    icao = request.form.get("icao", "").strip().upper().zfill(6)
+    entries = read_user_entries()
+    remaining = [e for e in entries if (e.get("$ICAO") or "").strip().upper().zfill(6) != icao]
+    write_user_entries(remaining)
+    flash(f"Removed {icao}. Click Apply to make it active for flagging.")
+    return redirect(url_for("admin"))
+
+@app.route("/admin/reload", methods=["POST"])
+@login_required
+def admin_reload():
+    load_alert_db()
+    sync_alert_db_to_basestation()
+    flash(f"Reloaded - {len(ALERT_DB)} total watchlist entries active.")
+    return redirect(url_for("admin"))
+
 # ---------------- Main ----------------
 if __name__ == "__main__":
     init_db()
     init_basestation_db()
+    ensure_user_csv()
     load_alert_db()
     sync_alert_db_to_basestation()
     from threading import Thread
