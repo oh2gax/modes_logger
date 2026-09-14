@@ -222,12 +222,12 @@
         {% endif %}
     </div>
 
+    {% if logged_in %}
     <div class="panel">
         <form method="post" action="{{ url_for('admin_settings') }}" class="settings-form">
             <label>
                 <input type="checkbox" name="eastern_red_enabled" value="1"
                        {% if eastern_red_enabled %}checked{% endif %}
-                       {% if not logged_in %}disabled{% endif %}
                        onchange="this.form.submit()">
                 Show flagged eastern planes as red
             </label>
@@ -245,7 +245,7 @@
                 <th>Operator</th>
                 <th>Type</th>
                 <th>CMPG</th>
-                {% if logged_in %}<th>Actions</th>{% endif %}
+                <th>Actions</th>
             </tr>
         </thead>
         <tbody>
@@ -260,7 +260,6 @@
                 <td class="{{ 'from-basestation' if row.type_from_basestation else '' }}"
                     {% if row.type_from_basestation %}title="Looked up from BaseStation.sqb — not stored in plane-alert-user.csv"{% endif %}>{{ row.display_type }}</td>
                 <td>{{ row.cmpg_label }}</td>
-                {% if logged_in %}
                 <td class="actions-cell">
                     <button type="button" class="edit-btn"
                         data-icao="{{ e['$ICAO'] }}"
@@ -287,15 +286,17 @@
                         </label>
                     </form>
                 </td>
-                {% endif %}
             </tr>
             {% endfor %}
             {% if not rows %}
-            <tr><td colspan="{{ 7 if logged_in else 6 }}" class="no-results">No watchlist entries yet.</td></tr>
+            <tr><td colspan="7" class="no-results">No watchlist entries yet.</td></tr>
             {% endif %}
         </tbody>
     </table>
     </div>
+    {% else %}
+    <p class="no-results">Log in to view your watchlist entries.</p>
+    {% endif %}
 
     {% if logged_in %}
     <div class="panel">

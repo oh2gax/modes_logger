@@ -912,60 +912,68 @@ def api_liveflights():
 @app.route("/admin")
 def admin():
     logged_in = bool(session.get("admin_logged_in"))
-    entries = read_user_entries()
-    # The DB search box only renders when logged in, but a crafted URL
-    # could still pass ?db_q= while logged out - so gate it here too,
-    # not just by hiding the form.
-    db_query = request.args.get("db_q", "").strip() if logged_in else ""
+    # Everything below - the watchlist entries themselves, the DB search
+    # tool, and the eastern-red toggle's current state - is only built and
+    # sent to the template when logged in. This isn't just a template-level
+    # hiding decision: a logged-out request never even reads
+    # plane-alert-user.csv or the eastern-red setting, so a crafted request
+    # can't recover them either.
+    db_query = ""
     db_results = []
-
-    # Display only - never written back to plane-alert-user.csv. An entry
-    # that only specifies an ICAO24 (or leaves Registration/Type blank)
-    # gets those fields filled in from BaseStation.sqb when that aircraft
-    # has already been logged, e.g. a friend's plane that's flown past
-    # before. That way "just watch this ICAO24" still shows something
-    # meaningful here, and if the entry is later removed, nothing about
-    # it was ever added to the CSV beyond what was actually typed in.
-    conn_base = sqlite3.connect(SQB_DB_PATH)
     rows = []
-    try:
-        cur_base = conn_base.cursor()
-        for e in entries:
-            reg_lookup = type_lookup = None
-            if not e.get("$Registration") or not (e.get("$Type") or e.get("$ICAO Type")):
-                reg_lookup, type_lookup = lookup_basestation(cur_base, e.get("$ICAO", ""))
-            raw_cmpg = (e.get("#CMPG") or "").strip()
-            rows.append({
-                "raw": e,
-                "display_registration": e.get("$Registration") or reg_lookup or "",
-                "display_type": e.get("$Type") or e.get("$ICAO Type") or type_lookup or "",
-                "reg_from_basestation": bool(reg_lookup) and not e.get("$Registration"),
-                "type_from_basestation": bool(type_lookup) and not (e.get("$Type") or e.get("$ICAO Type")),
-                "cmpg_label": CMPG_DISPLAY_LABELS.get(raw_cmpg, raw_cmpg or "—"),
-                "enabled": is_user_entry_enabled(e),
-            })
+    eastern_red_enabled = None
 
-        if db_query:
-            # Same ICAO24-or-Registration, *-wildcard search as the main
-            # Search page, just narrower output (ICAO24/Registration/Type)
-            # and capped, since this is meant to help fill in the add-entry
-            # form above, not be a general query tool.
-            pattern = db_query.replace("*", "%")
-            cur_base.execute(
-                "SELECT ModeS, Registration, ICAOTypeCode FROM Aircraft "
-                "WHERE ModeS LIKE ? OR Registration LIKE ? LIMIT 50",
-                (pattern, pattern),
-            )
-            db_results = cur_base.fetchall()
-    finally:
-        conn_base.close()
+    if logged_in:
+        entries = read_user_entries()
+        eastern_red_enabled = read_eastern_red_enabled()
+        db_query = request.args.get("db_q", "").strip()
+
+        # Display only - never written back to plane-alert-user.csv. An entry
+        # that only specifies an ICAO24 (or leaves Registration/Type blank)
+        # gets those fields filled in from BaseStation.sqb when that aircraft
+        # has already been logged, e.g. a friend's plane that's flown past
+        # before. That way "just watch this ICAO24" still shows something
+        # meaningful here, and if the entry is later removed, nothing about
+        # it was ever added to the CSV beyond what was actually typed in.
+        conn_base = sqlite3.connect(SQB_DB_PATH)
+        try:
+            cur_base = conn_base.cursor()
+            for e in entries:
+                reg_lookup = type_lookup = None
+                if not e.get("$Registration") or not (e.get("$Type") or e.get("$ICAO Type")):
+                    reg_lookup, type_lookup = lookup_basestation(cur_base, e.get("$ICAO", ""))
+                raw_cmpg = (e.get("#CMPG") or "").strip()
+                rows.append({
+                    "raw": e,
+                    "display_registration": e.get("$Registration") or reg_lookup or "",
+                    "display_type": e.get("$Type") or e.get("$ICAO Type") or type_lookup or "",
+                    "reg_from_basestation": bool(reg_lookup) and not e.get("$Registration"),
+                    "type_from_basestation": bool(type_lookup) and not (e.get("$Type") or e.get("$ICAO Type")),
+                    "cmpg_label": CMPG_DISPLAY_LABELS.get(raw_cmpg, raw_cmpg or "—"),
+                    "enabled": is_user_entry_enabled(e),
+                })
+
+            if db_query:
+                # Same ICAO24-or-Registration, *-wildcard search as the main
+                # Search page, just narrower output (ICAO24/Registration/Type)
+                # and capped, since this is meant to help fill in the add-entry
+                # form above, not be a general query tool.
+                pattern = db_query.replace("*", "%")
+                cur_base.execute(
+                    "SELECT ModeS, Registration, ICAOTypeCode FROM Aircraft "
+                    "WHERE ModeS LIKE ? OR Registration LIKE ? LIMIT 50",
+                    (pattern, pattern),
+                )
+                db_results = cur_base.fetchall()
+        finally:
+            conn_base.close()
 
     return render_template(
         "admin.html",
         rows=rows,
         logged_in=logged_in,
         auth_configured=os.path.exists(DBAUTH_PATH),
-        eastern_red_enabled=read_eastern_red_enabled(),
+        eastern_red_enabled=eastern_red_enabled,
         allowed_cmpg=ALLOWED_CMPG,
         cmpg_display_labels=CMPG_DISPLAY_LABELS,
         db_query=db_query,

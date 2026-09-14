@@ -18,6 +18,9 @@ under that day's heading.
 ### Changed
 - The CSS variable and row class previously specific to "your own watchlist" (`--user-bg`, `.user-alert`) were renamed to `--civ-bg`/`.civ-alert`, reflecting that Civil is now a shared classification used by both the official and personal watchlists rather than something unique to the admin page's entries.
 
+### Security
+- Admin page (`/admin`): your watchlist entries, the BaseStation.sqb search tool, and the "Show flagged eastern planes as red" toggle's current on/off state are no longer shown at all while logged out — previously the entry table (and the toggle's state) were still displayed read-only. Logged out, the page now shows a plain "Log in to view your watchlist entries" message and nothing else. This is enforced server-side, not just by hiding elements in the template: a logged-out request to `/admin` never reads `plane-alert-user.csv` or the eastern-red setting in the first place, so there's nothing to recover even by viewing the page source or requesting it directly.
+
 ## 2026-09-13
 
 ### Added

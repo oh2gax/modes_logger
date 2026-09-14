@@ -155,12 +155,17 @@ in place, with existing rows defaulted to Enabled). In practice you'll
 usually only fill in the ICAO24 (and maybe registration/type/CMPG) —
 everything else is optional reference detail.
 
-Editing is gated behind a simple login: create a `dbauth.txt` file in the
+Access is gated behind a simple login: create a `dbauth.txt` file in the
 modes_logger folder (next to `modes-logger.py`) with one line,
 `username:passwd`. It's read fresh on every login attempt, so changing the
 credentials takes effect immediately without a restart, and it's excluded
 from the repo via `.gitignore` since it's a plaintext credential file.
-Without it, `/admin` still shows the current watchlist, just read-only.
+Logged out, `/admin` shows only a login form (or a note that login isn't
+set up yet) — your watchlist entries, the BaseStation.sqb search tool, and
+the "Show flagged eastern planes as red" setting are never loaded or sent
+to the page for a logged-out request, not just hidden by the template, so
+there's nothing to see even by viewing the page source or requesting it
+directly.
 
 Logged in, you get a table of current entries with an Edit button, a Remove
 button, and an Enabled tickbox, plus a small add/edit form (ICAO24,
@@ -354,14 +359,15 @@ rate in feet per minute, straight from the feed.
 ### Admin page (`/admin`)
 
 Manage your own watchlist (see "Your own watchlist" above). Not linked from
-any other page — open it directly by URL. Logged out, it shows the current
-`plane-alert-user.csv` entries read-only (including each entry's CMPG
-column) and the read-only state of the "Show flagged eastern planes as red"
-toggle; log in with the credentials from `dbauth.txt` to add, edit, remove,
-or enable/disable entries, change that toggle, use the BaseStation.sqb
-search tool, and to use the **Apply** button that reloads all watchlists
-for flagging purposes. An entry that's missing Registration/Type but
-matches an aircraft already known in `BaseStation.sqb` shows those values
+any other page — open it directly by URL. Logged out, it shows just a login
+form and a "Log in to view your watchlist entries" note in place of the
+table — your entries, the eastern-red toggle's current on/off state, and
+the BaseStation.sqb search tool are withheld entirely until you log in with
+the credentials from `dbauth.txt`. Once logged in you can add, edit,
+remove, or enable/disable entries, change that toggle, use the
+BaseStation.sqb search tool, and use the **Apply** button that reloads all
+watchlists for flagging purposes. An entry that's missing Registration/Type
+but matches an aircraft already known in `BaseStation.sqb` shows those values
 in italics for reference — looked up on the fly, never written into the
 CSV itself.
 
