@@ -14,9 +14,14 @@ under that day's heading.
 - Admin page: a new "Show flagged eastern planes as red" tickbox (off by default, persisted to a new `admin_settings.json` file). When enabled, any aircraft that's already flagged on a watchlist and whose ICAO24 falls in Russia's allocated Mode-S address block (`100000`–`1FFFFF` hex) is shown with a red background instead of its usual Mil/Gov/Civ color — it never flags a plane that isn't already on a watchlist, only recolors ones that are.
 - Admin page: a small BaseStation.sqb search tool — search the app's own aircraft database by ICAO24 or Registration (wildcards supported) to find Type/Registration for a plane you've already logged, then click **Use** to drop its details straight into the add/edit form. Handy for adding a plane to your own watchlist without having to type its ICAO24 from memory.
 - `plane-alert-user.csv` gained a 12th column, `Enabled`; an existing 11-column file is migrated to the new layout automatically the first time it's read, with all existing rows defaulted to Enabled so nothing already on the list gets silently dropped.
+- Live Flights page: Latitude and Longitude are now one combined Lat/Lon column (e.g. `60.349 25.102`, rounded to 3 decimal places) instead of two separate columns, freeing up space for a new Distance column showing each aircraft's great-circle distance from EFHK (Helsinki-Vantaa) in nautical miles, computed in the browser from its current position. Distance is sortable like the other numeric columns (closest or farthest first) and is blank, sorting to the bottom, until a position is known — a quick way to see what's nearby versus still far out.
 
 ### Changed
 - The CSS variable and row class previously specific to "your own watchlist" (`--user-bg`, `.user-alert`) were renamed to `--civ-bg`/`.civ-alert`, reflecting that Civil is now a shared classification used by both the official and personal watchlists rather than something unique to the admin page's entries.
+- Results and Live Flights pages: removed the gray row-hover highlight, since it visually clashed with the Mil/Gov/Civ/eastern-red row coloring on flagged aircraft. Rows on both pages are no longer highlighted on mouseover; the admin page's watchlist table is unaffected.
+
+### Fixed
+- Admin page: searching BaseStation.sqb no longer leaves the search results scrolled out of view below a long watchlist table — the search form now submits to a `#db-search` anchor, so the page lands back on the search box and its results instead of at the top of the page.
 
 ## 2026-09-13
 

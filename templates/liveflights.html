@@ -70,9 +70,6 @@
         tr.eastern-alert {
             background-color: var(--eastern-bg);
         }
-        tr:hover {
-            background-color: var(--row-hover-bg);
-        }
         .numbering {
             width: 50px;
         }
@@ -96,9 +93,6 @@
         }
         tr.eastern-alert .sticky-col {
             background-color: var(--eastern-bg);
-        }
-        tr:hover .sticky-col {
-            background-color: var(--row-hover-bg);
         }
         th.sticky-col {
             z-index: 3;
@@ -151,8 +145,8 @@
                 <th data-sort="vertical_rate">Vert Rate</th>
                 <th>Track</th>
                 <th>Speed</th>
-                <th>Latitude</th>
-                <th>Longitude</th>
+                <th>Lat/Lon</th>
+                <th data-sort="distance">Distance (NM)</th>
             </tr>
         </thead>
         <tbody id="live-tbody">
@@ -162,7 +156,13 @@
 
     <script>
         const REFRESH_MS = {{ refresh_ms }};
-        const SORT_LABELS = { registration: 'Registration', icao24: 'ICAO24', altitude: 'Altitude', vertical_rate: 'Vert Rate', selected_altitude: 'Selected Alt' };
+        const SORT_LABELS = { registration: 'Registration', icao24: 'ICAO24', altitude: 'Altitude', vertical_rate: 'Vert Rate', selected_altitude: 'Selected Alt', distance: 'Distance (NM)' };
+
+        // Reference point for the Distance column: EFHK (Helsinki-Vantaa)
+        // airport reference point, in decimal degrees.
+        const EFHK_LAT = 60.3172;
+        const EFHK_LON = 24.9633;
+        const EARTH_RADIUS_NM = 3440.065;
 
         // Transition altitude (feet), used by both the Altitude and Selected
         // Alt columns: above it, shown as a flight level ("F370"); below it,
@@ -209,6 +209,30 @@
             return String(value);
         }
 
+        function formatLatLon(lat, lon) {
+            if (lat === null || lat === undefined || lat === '' || lon === null || lon === undefined || lon === '') return '';
+            return lat.toFixed(3) + ' ' + lon.toFixed(3);
+        }
+
+        // Great-circle distance from EFHK, in nautical miles. Returns null
+        // when the aircraft's position isn't known yet, same as the other
+        // still-blank fields, so it sorts to the bottom like they do.
+        function distanceFromEfhkNm(lat, lon) {
+            if (lat === null || lat === undefined || lat === '' || lon === null || lon === undefined || lon === '') return null;
+            const toRad = d => d * Math.PI / 180;
+            const dLat = toRad(lat - EFHK_LAT);
+            const dLon = toRad(lon - EFHK_LON);
+            const a = Math.sin(dLat / 2) ** 2 +
+                      Math.cos(toRad(EFHK_LAT)) * Math.cos(toRad(lat)) * Math.sin(dLon / 2) ** 2;
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return EARTH_RADIUS_NM * c;
+        }
+
+        function formatDistance(value) {
+            if (value === null || value === undefined || value === '') return '';
+            return value.toFixed(1);
+        }
+
         function compareValues(a, b, key) {
             const va = a[key];
             const vb = b[key];
@@ -219,7 +243,7 @@
             if (aBlank && bBlank) return 0;
             if (aBlank) return 1;
             if (bBlank) return -1;
-            if (key === 'altitude' || key === 'vertical_rate' || key === 'selected_altitude') {
+            if (key === 'altitude' || key === 'vertical_rate' || key === 'selected_altitude' || key === 'distance') {
                 return va - vb;
             }
             return String(va).localeCompare(String(vb), undefined, { numeric: true, sensitivity: 'base' });
@@ -271,8 +295,8 @@
                 tr.appendChild(cell(ac.vertical_rate));
                 tr.appendChild(cell(ac.track));
                 tr.appendChild(cell(ac.speed));
-                tr.appendChild(cell(ac.lat));
-                tr.appendChild(cell(ac.lon));
+                tr.appendChild(cell(formatLatLon(ac.lat, ac.lon)));
+                tr.appendChild(cell(formatDistance(ac.distance)));
                 tbody.appendChild(tr);
             });
         }
@@ -303,6 +327,9 @@
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
                 currentData = data.aircraft;
+                // Precomputed once per refresh so sortData/compareValues can
+                // treat "distance" like any other numeric field on ac.
+                currentData.forEach(ac => { ac.distance = distanceFromEfhkNm(ac.lat, ac.lon); });
                 lastUpdatedUtc = data.updated_utc;
                 renderCurrent();
                 updateStatus();

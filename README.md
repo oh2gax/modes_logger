@@ -314,7 +314,7 @@ the Search page.
 
 A near-real-time view of everything currently being received (Registration,
 ICAO24, Callsign, Type, Squawk, Altitude, Selected Alt, Vert Rate, Track,
-Speed, Latitude, Longitude), independent of the history in `adsb_data.db` —
+Speed, Lat/Lon, Distance), independent of the history in `adsb_data.db` —
 it's simply whatever was in the most recent poll of the JSON feed, so an
 aircraft disappears from this page as soon as one poll cycle no longer
 reports it. It refreshes automatically every `LIVE_PAGE_REFRESH_SECONDS`
@@ -322,11 +322,12 @@ via a small JavaScript poller (no full page reload), and uses the same
 sticky header, frozen Registration column, and alert-row highlighting as
 the Results page.
 
-Click the Registration, ICAO24, Altitude, Selected Alt, or Vert Rate column
-headers to sort by that column (click again to reverse direction); it opens
-sorted by altitude ascending (lowest first) by default, and keeps whatever
-sort you pick across each refresh. Blank values (e.g. no registration yet,
-altitude not decoded) always sort to the bottom regardless of direction.
+Click the Registration, ICAO24, Altitude, Selected Alt, Vert Rate, or
+Distance column headers to sort by that column (click again to reverse
+direction); it opens sorted by altitude ascending (lowest first) by
+default, and keeps whatever sort you pick across each refresh. Blank
+values (e.g. no registration yet, altitude not decoded, position not yet
+known) always sort to the bottom regardless of direction.
 
 A "Show only flagged" checkbox sits above the top-left corner of the table
 (above the `#` column). Checking it filters the currently-displayed
@@ -355,6 +356,16 @@ value (often slightly off a round number, e.g. `36992`) is rounded to the
 nearest 100ft before display; sorting still uses the exact underlying
 value, unaffected by the rounding/formatting. Vert Rate is the vertical
 rate in feet per minute, straight from the feed.
+
+Latitude and Longitude are combined into one Lat/Lon column, e.g.
+`60.349 25.102`, rounded to 3 decimal places (roughly 100m of precision) —
+plenty for a glance at where a plane is, without the extra column width two
+separate fields need. Distance shows each aircraft's great-circle distance
+from EFHK (Helsinki-Vantaa), in nautical miles, computed in the browser from
+its current position and rounded to one decimal; it's blank until a
+position is known, same as Lat/Lon. Sorting by Distance (ascending for
+closest first, descending for farthest) is handy for quickly spotting
+what's nearby versus what's still far out.
 
 ### Admin page (`/admin`)
 
