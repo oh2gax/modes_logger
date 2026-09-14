@@ -19,6 +19,7 @@ under that day's heading.
 ### Changed
 - The CSS variable and row class previously specific to "your own watchlist" (`--user-bg`, `.user-alert`) were renamed to `--civ-bg`/`.civ-alert`, reflecting that Civil is now a shared classification used by both the official and personal watchlists rather than something unique to the admin page's entries.
 - Results and Live Flights pages: removed the gray row-hover highlight, since it visually clashed with the Mil/Gov/Civ/eastern-red row coloring on flagged aircraft. Rows on both pages are no longer highlighted on mouseover; the admin page's watchlist table is unaffected.
+- Live Flights page: a small gap now opens up between the sticky column-title row and the first flight strip when "Show only flagged" is checked — previously a flagged row's color (e.g. the light-blue military highlight) sat flush against the dark header and could be mistaken for part of it at a glance. Only the flight-strip view is affected; the normal (unfiltered) table is unchanged.
 
 ### Fixed
 - Admin page: searching BaseStation.sqb no longer leaves the search results scrolled out of view below a long watchlist table — the search form now submits to a `#db-search` anchor, so the page lands back on the search box and its results instead of at the top of the page.

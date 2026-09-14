@@ -120,6 +120,15 @@
             font-size: 20px;
             padding: 11px 10px;
         }
+        /* A small gap between the sticky header and the first flight strip,
+           so a flagged row's color (e.g. the light-blue military highlight)
+           doesn't sit flush against the header and get mistaken for it at a
+           glance. Only the first row needs it - a themed border-top "wins"
+           over the header's own thin bottom border under border-collapse,
+           without disturbing spacing between the rows themselves. */
+        table.big-rows tbody tr:first-child td {
+            border-top: 10px solid var(--bg);
+        }
     </style>
 </head>
 <body>

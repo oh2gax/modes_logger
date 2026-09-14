@@ -342,8 +342,10 @@ strip" style: roughly 1.7x the normal font size and doubled row padding,
 so the few tracked aircraft are easier to scan at a glance. Only the data
 cells change size — the column header row, the sticky Registration column,
 and the Mil/Gov/Civ/eastern-red row coloring all stay exactly as they are
-in the normal view. Unchecking the box instantly reverts both the filter
-and the row size together.
+in the normal view. A small gap also opens up between the header and the
+first flight strip in this view, so a flagged row's color doesn't sit
+flush against the header and get mistaken for it at a glance. Unchecking
+the box instantly reverts the filter, the row size, and the gap together.
 
 Altitude and Selected Alt are shown in standard aviation shorthand instead
 of raw feet: at or above a 5000ft transition altitude (hardcoded in
