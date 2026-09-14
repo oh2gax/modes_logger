@@ -90,7 +90,7 @@
         .table-wrapper {
             overflow: auto;
             margin: 20px auto;
-            max-width: 900px;
+            max-width: 960px;
             max-height: calc(100vh - 140px);
         }
         table {
@@ -124,6 +124,13 @@
         .actions-cell button {
             margin: 0 2px;
         }
+        .enabled-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            cursor: pointer;
+            margin-left: 4px;
+        }
         .entry-form {
             max-width: 720px;
             margin: 20px auto;
@@ -140,12 +147,14 @@
             gap: 3px;
             flex: 1 1 150px;
         }
-        .form-row input {
+        .form-row input, .form-row select {
             padding: 5px 7px;
             border: 1px solid var(--border);
             border-radius: 4px;
             background: var(--bg);
             color: var(--text);
+            font-family: Arial, sans-serif;
+            font-size: 12px;
         }
         details {
             margin: 8px 0;
@@ -158,6 +167,26 @@
             max-width: 720px;
             margin: 10px auto 0 auto;
             text-align: center;
+        }
+        .settings-form label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            justify-content: center;
+        }
+        .db-search-form {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .db-search-form input {
+            flex: 1 1 200px;
+            padding: 5px 7px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--bg);
+            color: var(--text);
         }
     </style>
 </head>
@@ -193,6 +222,18 @@
         {% endif %}
     </div>
 
+    <div class="panel">
+        <form method="post" action="{{ url_for('admin_settings') }}" class="settings-form">
+            <label>
+                <input type="checkbox" name="eastern_red_enabled" value="1"
+                       {% if eastern_red_enabled %}checked{% endif %}
+                       {% if not logged_in %}disabled{% endif %}
+                       onchange="this.form.submit()">
+                Show flagged eastern planes as red
+            </label>
+        </form>
+    </div>
+
     <p class="no-results">Italic cells are looked up from <code>BaseStation.sqb</code> for planes already seen before — not stored in <code>plane-alert-user.csv</code>.</p>
     <div class="table-wrapper">
     <table>
@@ -203,6 +244,7 @@
                 <th>Registration</th>
                 <th>Operator</th>
                 <th>Type</th>
+                <th>CMPG</th>
                 {% if logged_in %}<th>Actions</th>{% endif %}
             </tr>
         </thead>
@@ -217,6 +259,7 @@
                 <td>{{ e['$Operator'] }}</td>
                 <td class="{{ 'from-basestation' if row.type_from_basestation else '' }}"
                     {% if row.type_from_basestation %}title="Looked up from BaseStation.sqb — not stored in plane-alert-user.csv"{% endif %}>{{ row.display_type }}</td>
+                <td>{{ row.cmpg_label }}</td>
                 {% if logged_in %}
                 <td class="actions-cell">
                     <button type="button" class="edit-btn"
@@ -236,23 +279,66 @@
                         <input type="hidden" name="icao" value="{{ e['$ICAO'] }}">
                         <button type="submit">Remove</button>
                     </form>
+                    <form method="post" action="{{ url_for('admin_toggle_enabled') }}" class="inline-form" style="display:inline;">
+                        <input type="hidden" name="icao" value="{{ e['$ICAO'] }}">
+                        <label class="enabled-label">
+                            <input type="checkbox" {% if row.enabled %}checked{% endif %} onchange="this.form.submit()">
+                            Enabled
+                        </label>
+                    </form>
                 </td>
                 {% endif %}
             </tr>
             {% endfor %}
             {% if not rows %}
-            <tr><td colspan="{{ 6 if logged_in else 5 }}" class="no-results">No watchlist entries yet.</td></tr>
+            <tr><td colspan="{{ 7 if logged_in else 6 }}" class="no-results">No watchlist entries yet.</td></tr>
             {% endif %}
         </tbody>
     </table>
     </div>
 
     {% if logged_in %}
+    <div class="panel">
+        <form method="get" action="{{ url_for('admin') }}" class="db-search-form">
+            <input type="text" name="db_q" value="{{ db_query or '' }}" placeholder="Search BaseStation.sqb by ICAO24 or Registration, * wildcard allowed">
+            <button type="submit">Search database</button>
+        </form>
+        {% if db_query %}
+        <div class="table-wrapper" style="margin: 12px 0 0 0; max-height: 240px;">
+        <table>
+            <thead>
+                <tr><th>ICAO24</th><th>Registration</th><th>Type</th><th></th></tr>
+            </thead>
+            <tbody>
+                {% for icao, reg, typ in db_results %}
+                <tr>
+                    <td>{{ icao }}</td>
+                    <td>{{ reg }}</td>
+                    <td>{{ typ }}</td>
+                    <td><button type="button" class="use-btn" data-icao="{{ icao }}" data-registration="{{ reg or '' }}" data-type="{{ typ or '' }}">Use</button></td>
+                </tr>
+                {% endfor %}
+                {% if not db_results %}
+                <tr><td colspan="4" class="no-results">No matches found.</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+        </div>
+        {% endif %}
+    </div>
+
     <form method="post" action="{{ url_for('admin_save') }}" id="entry-form" class="entry-form">
         <div class="form-row">
             <label>ICAO24 <input type="text" id="icao" name="icao" maxlength="6" required placeholder="e.g. 4CA1B2"></label>
             <label>Registration <input type="text" id="registration" name="registration" placeholder="e.g. OH-ABC"></label>
             <label>Type <input type="text" id="type" name="type" placeholder="e.g. Boeing 737"></label>
+            <label>CMPG
+                <select id="cmpg" name="cmpg">
+                    {% for value in allowed_cmpg %}
+                    <option value="{{ value }}" {% if value == 'Civ' %}selected{% endif %}>{{ cmpg_display_labels.get(value, value) }}</option>
+                    {% endfor %}
+                </select>
+            </label>
         </div>
         <details>
             <summary>More fields (optional)</summary>
@@ -262,7 +348,6 @@
                 <label>Category <input type="text" id="category" name="category"></label>
             </div>
             <div class="form-row">
-                <label>CMPG <input type="text" id="cmpg" name="cmpg"></label>
                 <label>Tag 1 <input type="text" id="tag1" name="tag1"></label>
                 <label>Tag 2 <input type="text" id="tag2" name="tag2"></label>
                 <label>Tag 3 <input type="text" id="tag3" name="tag3"></label>
@@ -291,6 +376,21 @@
                 if (form) form.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 var icaoEl = document.getElementById('icao');
                 if (icaoEl) icaoEl.focus();
+            });
+        });
+
+        document.querySelectorAll('.use-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var icaoEl = document.getElementById('icao');
+                var regEl = document.getElementById('registration');
+                var typeEl = document.getElementById('type');
+                if (icaoEl) icaoEl.value = btn.dataset.icao || '';
+                if (regEl) regEl.value = btn.dataset.registration || '';
+                if (typeEl) typeEl.value = btn.dataset.type || '';
+                var form = document.getElementById('entry-form');
+                if (form) form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                var cmpgEl = document.getElementById('cmpg');
+                if (cmpgEl) cmpgEl.focus();
             });
         });
     </script>

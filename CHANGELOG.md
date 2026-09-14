@@ -4,6 +4,20 @@ All notable changes to this project are documented here, grouped by date
 (newest first). Multiple changes made on the same day are listed together
 under that day's heading.
 
+## 2026-09-14
+
+### Added
+- New combined watchlist source: `alertdb/plane-alert-db.csv`, the full [plane-alert-db](https://github.com/sdr-enthusiasts/plane-alert-db) database (17,229 entries), loaded at startup alongside the existing `plane-alert-gov.csv`/`plane-alert-mil.csv` files. The master file is a strict superset of both, so it's loaded first and any ICAO24 already present from it is skipped when the older files are read afterward — avoiding duplicate/conflicting entries between the master file and its own derivatives, with no data lost either way.
+- Row highlight color is now driven by each watchlist entry's `#CMPG` field (the plane-alert-db project's own standard Military/Government/Civil classification) instead of which file it came from: Military stays light blue, Government stays light green (now also covering `#CMPG` values of `Pol`, i.e. police), and a new Civil category — light amber, the same color previously used only for your own watchlist — covers everything else, including a blank or unrecognized `#CMPG` value.
+- Admin page: the CMPG field moved out of the "More fields" section and now sits as a Military/Government/Civil dropdown right next to Type in the main add/edit form. Saving an entry writes the selected value straight into its `#CMPG` field using the same standard the official CSV uses, so your own watchlist entries get colored exactly like the curated lists.
+- Admin page: an Enabled tickbox next to each entry's Remove button lets you pull an entry out of flagging without deleting it — unticking it keeps the row (and all its data) in `plane-alert-user.csv`, just excluded the next time the watchlists are loaded/Applied. Editing an entry's other fields never silently changes its Enabled state.
+- Admin page: a new "Show flagged eastern planes as red" tickbox (off by default, persisted to a new `admin_settings.json` file). When enabled, any aircraft that's already flagged on a watchlist and whose ICAO24 falls in Russia's allocated Mode-S address block (`100000`–`1FFFFF` hex) is shown with a red background instead of its usual Mil/Gov/Civ color — it never flags a plane that isn't already on a watchlist, only recolors ones that are.
+- Admin page: a small BaseStation.sqb search tool — search the app's own aircraft database by ICAO24 or Registration (wildcards supported) to find Type/Registration for a plane you've already logged, then click **Use** to drop its details straight into the add/edit form. Handy for adding a plane to your own watchlist without having to type its ICAO24 from memory.
+- `plane-alert-user.csv` gained a 12th column, `Enabled`; an existing 11-column file is migrated to the new layout automatically the first time it's read, with all existing rows defaulted to Enabled so nothing already on the list gets silently dropped.
+
+### Changed
+- The CSS variable and row class previously specific to "your own watchlist" (`--user-bg`, `.user-alert`) were renamed to `--civ-bg`/`.civ-alert`, reflecting that Civil is now a shared classification used by both the official and personal watchlists rather than something unique to the admin page's entries.
+
 ## 2026-09-13
 
 ### Added

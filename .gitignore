@@ -5,6 +5,7 @@
 *.sqb
 *.sqb-wal
 *.sqb-shm
+admin_settings.json
 
 # Admin login credentials for the /admin watchlist page — plaintext
 # username:password, never committed

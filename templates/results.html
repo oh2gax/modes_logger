@@ -70,8 +70,11 @@
         tr.gov-alert {
             background-color: var(--gov-bg);
         }
-        tr.user-alert {
-            background-color: var(--user-bg);
+        tr.civ-alert {
+            background-color: var(--civ-bg);
+        }
+        tr.eastern-alert {
+            background-color: var(--eastern-bg);
         }
         tr:hover {
             background-color: var(--row-hover-bg);
@@ -94,8 +97,11 @@
         tr.gov-alert .sticky-col {
             background-color: var(--gov-bg);
         }
-        tr.user-alert .sticky-col {
-            background-color: var(--user-bg);
+        tr.civ-alert .sticky-col {
+            background-color: var(--civ-bg);
+        }
+        tr.eastern-alert .sticky-col {
+            background-color: var(--eastern-bg);
         }
         tr:hover .sticky-col {
             background-color: var(--row-hover-bg);
@@ -140,7 +146,7 @@
         <tbody>
             {% for row in results %}
             {% set alert = alert_lookup.get(row[0]) %}
-            <tr class="{{ 'mil-alert' if alert == 'mil' else ('gov-alert' if alert == 'gov' else ('user-alert' if alert == 'user' else '')) }}">
+            <tr class="{{ 'mil-alert' if alert == 'mil' else ('gov-alert' if alert == 'gov' else ('civ-alert' if alert == 'civ' else ('eastern-alert' if alert == 'eastern' else ''))) }}">
                 <td>{{ loop.index }}</td>
                 <td class="sticky-col">{{ row[1] }}</td>   <!-- Registration -->
                 <td>{{ row[0] }}</td>   <!-- ICAO24 -->

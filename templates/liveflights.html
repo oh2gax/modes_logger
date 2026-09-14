@@ -64,8 +64,11 @@
         tr.gov-alert {
             background-color: var(--gov-bg);
         }
-        tr.user-alert {
-            background-color: var(--user-bg);
+        tr.civ-alert {
+            background-color: var(--civ-bg);
+        }
+        tr.eastern-alert {
+            background-color: var(--eastern-bg);
         }
         tr:hover {
             background-color: var(--row-hover-bg);
@@ -88,8 +91,11 @@
         tr.gov-alert .sticky-col {
             background-color: var(--gov-bg);
         }
-        tr.user-alert .sticky-col {
-            background-color: var(--user-bg);
+        tr.civ-alert .sticky-col {
+            background-color: var(--civ-bg);
+        }
+        tr.eastern-alert .sticky-col {
+            background-color: var(--eastern-bg);
         }
         tr:hover .sticky-col {
             background-color: var(--row-hover-bg);
@@ -173,7 +179,7 @@
 
         function applyFlaggedFilter(data) {
             if (!flaggedOnly) return data;
-            return data.filter(ac => ac.alert === 'mil' || ac.alert === 'gov' || ac.alert === 'user');
+            return data.filter(ac => ac.alert === 'mil' || ac.alert === 'gov' || ac.alert === 'civ' || ac.alert === 'eastern');
         }
 
         function cell(value, className) {
@@ -249,8 +255,10 @@
                     tr.className = 'mil-alert';
                 } else if (ac.alert === 'gov') {
                     tr.className = 'gov-alert';
-                } else if (ac.alert === 'user') {
-                    tr.className = 'user-alert';
+                } else if (ac.alert === 'civ') {
+                    tr.className = 'civ-alert';
+                } else if (ac.alert === 'eastern') {
+                    tr.className = 'eastern-alert';
                 }
                 tr.appendChild(cell(i + 1));
                 tr.appendChild(cell(ac.registration, 'sticky-col'));

@@ -44,36 +44,76 @@ SOCKET_TIMEOUT = 10          # seconds to wait for the JSON snapshot
 
 TS_FMT = "%d-%m-%Y %H:%M"    # stored human-readable format
 
-# Manually-maintained watchlists of military/government aircraft, from
-# https://github.com/sdr-enthusiasts/plane-alert-db - matched by ICAO24.
-# Loaded once at startup; edit the CSVs and restart to pick up changes.
+# Manually-maintained watchlists of military/government/civil aircraft,
+# from https://github.com/sdr-enthusiasts/plane-alert-db - matched by
+# ICAO24. plane-alert-db.csv is the combined upstream database and is the
+# primary source; plane-alert-gov.csv/plane-alert-mil.csv are kept only as
+# a fallback (every row in them is a byte-identical subset of the combined
+# file, so they contribute nothing once it's present, but nothing breaks if
+# it's ever missing and only the older two files exist). Loaded at startup
+# and reloadable on demand from the /admin page's Apply button.
 ALERTDB_DIR = os.path.join(BASE_DIR, "alertdb")
+ALERT_MASTER_CSV = os.path.join(ALERTDB_DIR, "plane-alert-db.csv")
 ALERT_GOV_CSV = os.path.join(ALERTDB_DIR, "plane-alert-gov.csv")
 ALERT_MIL_CSV = os.path.join(ALERTDB_DIR, "plane-alert-mil.csv")
 
 # User-maintained watchlist, edited from the /admin page (see below). Same
-# 11-column layout as the upstream gov/mil CSVs, so it can also be opened
-# and hand-edited in a spreadsheet - only $ICAO is required in practice.
+# columns as the upstream CSVs, plus one of our own, "Enabled" - so it can
+# also be opened and hand-edited in a spreadsheet. Only $ICAO is required
+# in practice.
 ALERT_USER_CSV = os.path.join(ALERTDB_DIR, "plane-alert-user.csv")
 USER_CSV_FIELDS = [
     "$ICAO", "$Registration", "$Operator", "$Type", "$ICAO Type", "#CMPG",
-    "$Tag 1", "$#Tag 2", "$#Tag 3", "Category", "$#Link",
+    "$Tag 1", "$#Tag 2", "$#Tag 3", "Category", "$#Link", "Enabled",
 ]
+
+# Maps a row's own #CMPG value (Mil/Gov/Civ/Pol, case-insensitive) to the
+# color-classification bucket used for highlighting - this is what decides
+# a row's color, not which file/source it was loaded from. Police (Pol) is
+# grouped under Government; anything blank or unrecognized defaults to
+# Civil, the least alarming bucket, rather than silently becoming
+# Military/Government.
+CMPG_CATEGORY_MAP = {"mil": "mil", "gov": "gov", "pol": "gov", "civ": "civ"}
+DEFAULT_CMPG_CATEGORY = "civ"
+
+# The three choices offered by the admin page's CMPG dropdown, written
+# verbatim into plane-alert-user.csv's #CMPG column - matching the exact
+# strings the real upstream data uses (confirmed by inspecting
+# plane-alert-db.csv), so the file stays compatible with the standard
+# format used by plane-alert-db.
+ALLOWED_CMPG = ("Mil", "Gov", "Civ")
+CMPG_DISPLAY_LABELS = {"Mil": "Military", "Gov": "Government", "Civ": "Civil"}
+
+# ICAO24 addresses allocated to the Russian Federation: the entire block
+# starting with hex digit "1" (100000-1FFFFF). Confirmed against two
+# independent sources - neighboring former-Soviet states (Ukraine,
+# Belarus, Kazakhstan, etc.) have entirely separate blocks elsewhere, so
+# this range doesn't accidentally catch them too.
+RUSSIA_ICAO24_MIN = 0x100000
+RUSSIA_ICAO24_MAX = 0x1FFFFF
 
 # Simple username:password gate for the /admin page. One line,
 # "username:passwd", in the modes_logger root. Read fresh on every login
 # attempt (never cached), so editing this file takes effect immediately.
 DBAUTH_PATH = os.path.join(BASE_DIR, "dbauth.txt")
 
+# Small admin-editable settings that need to persist across restarts (just
+# the eastern-red toggle for now). Read fresh on every render, same as
+# dbauth.txt, so a change takes effect immediately.
+ADMIN_SETTINGS_PATH = os.path.join(BASE_DIR, "admin_settings.json")
+
 LIVE_PAGE_REFRESH_SECONDS = 10   # how often liveflights.html polls /api/liveflights
 
 # ---------------- Shared in-memory state ----------------
-# ALERT_DB: ICAO24 -> {"category": "mil"/"gov"/"user", "registration":, "operator":, "type":}
-# populated at startup by load_alert_db(), and can also be reloaded on
-# demand from the /admin page's Apply button after the user CSV is edited -
-# so, unlike before the admin page existed, this is no longer purely
-# read-only after startup. ALERT_DB_LOCK guards the reassignment against
-# the poller thread and other request threads reading it mid-reload.
+# ALERT_DB: ICAO24 -> {"source": "official"/"user", "cmpg": "mil"/"gov"/"civ",
+# "registration":, "operator":, "type":}. "source" is the trust axis (does
+# this get written into BaseStation.sqb - see sync_alert_db_to_basestation);
+# "cmpg" is the color axis (which highlight color a row gets), independent
+# of where the entry came from. Populated at startup by load_alert_db(),
+# and reloadable on demand from the /admin page's Apply button - so, unlike
+# before the admin page existed, this is no longer purely read-only after
+# startup. ALERT_DB_LOCK guards the reassignment against the poller thread
+# and other request threads reading it mid-reload.
 ALERT_DB = {}
 ALERT_DB_LOCK = threading.Lock()
 
@@ -241,18 +281,64 @@ def init_basestation_db():
     conn.commit()
     conn.close()
 
-# ---------------- Alert DB (military/government watchlist) ----------------
+# ---------------- Alert DB (military/government/civil watchlist) --------
+def cmpg_to_category(cmpg_value):
+    """Map a raw #CMPG field value (Mil/Gov/Civ/Pol, case-insensitive) to
+    the internal color-classification bucket - see CMPG_CATEGORY_MAP."""
+    key = (cmpg_value or "").strip().lower()
+    return CMPG_CATEGORY_MAP.get(key, DEFAULT_CMPG_CATEGORY)
+
+def is_russian_icao24(icao24_hex):
+    """True if the ICAO24 hex address falls in Russia's allocated block
+    (see RUSSIA_ICAO24_MIN/MAX above)."""
+    try:
+        n = int(icao24_hex, 16)
+    except (TypeError, ValueError):
+        return False
+    return RUSSIA_ICAO24_MIN <= n <= RUSSIA_ICAO24_MAX
+
+def effective_alert_category(icao24, cmpg, eastern_red_enabled):
+    """The category actually used for row highlighting. Normally just the
+    entry's own cmpg bucket (mil/gov/civ), but recolored to "eastern" when
+    the eastern-red setting is on and this ICAO24 is Russian-registered -
+    regardless of its own CMPG classification. Only ever called for an
+    aircraft that's already flagged (has an ALERT_DB entry), so this never
+    flags a plane that wasn't already on a watchlist."""
+    if eastern_red_enabled and is_russian_icao24(icao24):
+        return "eastern"
+    return cmpg
+
 def load_alert_db():
-    """Load the plane-alert-db gov/mil CSVs, plus the user-maintained
-    plane-alert-user.csv watchlist, into the in-memory ALERT_DB dict. Each
-    file is optional - a missing or unreadable one is logged and skipped
-    rather than crashing the app, since these are manually-supplied
-    reference files, not required for modes_logger to run."""
+    """Load the alert-db watchlists into the in-memory ALERT_DB dict.
+
+    plane-alert-db.csv (the combined upstream database) is the primary
+    source - it's a strict superset of the older plane-alert-gov.csv /
+    plane-alert-mil.csv files (every row in those two is byte-identical to
+    its counterpart here), so those two are only kept as a fallback for
+    anything the master file might be missing, and contribute nothing once
+    it's present. Whichever official file an ICAO24 is first found in
+    wins over a later one, since they're never expected to disagree.
+
+    plane-alert-user.csv is always loaded last and always overwrites, so a
+    personal watchlist entry takes precedence over an official one for the
+    same ICAO24 if you ever add one that's already on an official list.
+    Disabled user entries (Enabled=0) are skipped entirely.
+
+    Each entry's color classification ("cmpg") comes from its own #CMPG
+    field, not from which file it was read from - so a Civil entry in the
+    master file and a Civil entry you add yourself look identical. Each
+    entry also separately records its "source" (official vs user), which
+    is the different question of whether it's trustworthy enough to write
+    into BaseStation.sqb - see sync_alert_db_to_basestation.
+
+    Every file here is optional - a missing or unreadable one is logged
+    and skipped rather than crashing the app."""
     global ALERT_DB
     alert_db = {}
-    for path, category in ((ALERT_GOV_CSV, "gov"), (ALERT_MIL_CSV, "mil"), (ALERT_USER_CSV, "user")):
+
+    for path in (ALERT_MASTER_CSV, ALERT_GOV_CSV, ALERT_MIL_CSV):
         if not os.path.exists(path):
-            print(f"Alert DB: {path} not found, skipping ({category})")
+            print(f"Alert DB: {path} not found, skipping")
             continue
         try:
             count = 0
@@ -265,23 +351,43 @@ def load_alert_db():
                     # point - zero-pad to the full 6 hex digits so they still
                     # match a real ICAO24.
                     icao = (row.get("$ICAO") or "").strip().upper().zfill(6)
-                    if not icao:
+                    if not icao or icao in alert_db:
                         continue
                     alert_db[icao] = {
-                        "category": category,
+                        "source": "official",
+                        "cmpg": cmpg_to_category(row.get("#CMPG")),
                         "registration": (row.get("$Registration") or "").strip(),
                         "operator": (row.get("$Operator") or "").strip(),
                         "type": (row.get("$ICAO Type") or "").strip(),
                     }
                     count += 1
-            print(f"Alert DB: loaded {count} {category} entries from {path}")
+            print(f"Alert DB: loaded {count} entries from {path}")
         except Exception as e:
             print(f"Alert DB: failed to load {path}: {e}")
+
+    try:
+        count = 0
+        for row in read_user_entries():
+            icao = (row.get("$ICAO") or "").strip().upper().zfill(6)
+            if not icao or not is_user_entry_enabled(row):
+                continue
+            alert_db[icao] = {
+                "source": "user",
+                "cmpg": cmpg_to_category(row.get("#CMPG")),
+                "registration": (row.get("$Registration") or "").strip(),
+                "operator": (row.get("$Operator") or "").strip(),
+                "type": (row.get("$ICAO Type") or "").strip(),
+            }
+            count += 1
+        print(f"Alert DB: loaded {count} user entries from {ALERT_USER_CSV}")
+    except Exception as e:
+        print(f"Alert DB: failed to load {ALERT_USER_CSV}: {e}")
+
     with ALERT_DB_LOCK:
         ALERT_DB = alert_db
 
 def sync_alert_db_to_basestation():
-    """Push gov/mil alert-db registrations/types into BaseStation.sqb at
+    """Push official alert-db registrations/types into BaseStation.sqb at
     startup (and again whenever /admin's Apply button reloads the alert
     DBs). These manually-curated lists are treated as more trustworthy than
     whatever the live feed happens to report, so they're written
@@ -289,21 +395,41 @@ def sync_alert_db_to_basestation():
     feed can still update an entry again later if it reports something
     different for that ICAO24 (see README for this trade-off).
 
-    User-defined watchlist entries ("category": "user") are deliberately
+    User-defined watchlist entries ("source": "user") are deliberately
     skipped here - that list can include perfectly ordinary aircraft the
-    user just wants to keep an eye on, so unlike the curated mil/gov lists,
-    it must never overwrite BaseStation.sqb."""
+    user just wants to keep an eye on, so unlike the curated official
+    lists, it must never overwrite BaseStation.sqb."""
     if not ALERT_DB:
         return
     conn_base = sqlite3.connect(SQB_DB_PATH)
     try:
         for icao24, info in ALERT_DB.items():
-            if info["category"] == "user":
+            if info["source"] == "user":
                 continue
             upsert_basestation_registration(conn_base, icao24, info["registration"], info["type"])
         conn_base.commit()
     finally:
         conn_base.close()
+
+def read_eastern_red_enabled():
+    """Read the "Show flagged eastern planes as red" setting from
+    admin_settings.json. Read fresh on every render - never cached - so a
+    change from /admin takes effect immediately. Defaults to off, and any
+    problem reading the file (missing, corrupt) also defaults to off
+    rather than failing the page."""
+    try:
+        with open(ADMIN_SETTINGS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return bool(data.get("eastern_red_enabled", False))
+    except Exception:
+        return False
+
+def write_eastern_red_enabled(value):
+    """Persist the eastern-red setting, atomically (temp file + replace)."""
+    tmp_path = ADMIN_SETTINGS_PATH + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump({"eastern_red_enabled": bool(value)}, f)
+    os.replace(tmp_path, ADMIN_SETTINGS_PATH)
 
 # ---------------- Admin: user watchlist + login ----------------
 def read_dbauth():
@@ -345,12 +471,36 @@ def login_required(view):
 
 def ensure_user_csv():
     """Create alertdb/plane-alert-user.csv with just the header row if it
-    doesn't already exist, so the admin page always has a file to read."""
-    if os.path.exists(ALERT_USER_CSV):
+    doesn't already exist. If it exists with an older/shorter header (e.g.
+    from before the Enabled column was added), migrate it in place -
+    existing rows keep their data, and any newly-added column defaults to
+    a safe value (Enabled defaults to "1", i.e. unchanged behavior)."""
+    if not os.path.exists(ALERT_USER_CSV):
+        os.makedirs(ALERTDB_DIR, exist_ok=True)
+        with open(ALERT_USER_CSV, "w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow(USER_CSV_FIELDS)
         return
-    os.makedirs(ALERTDB_DIR, exist_ok=True)
-    with open(ALERT_USER_CSV, "w", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerow(USER_CSV_FIELDS)
+    with open(ALERT_USER_CSV, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames == USER_CSV_FIELDS:
+            return  # already up to date
+        rows = list(reader)
+    for row in rows:
+        row.setdefault("Enabled", "1")
+    tmp_path = ALERT_USER_CSV + ".tmp"
+    with open(tmp_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=USER_CSV_FIELDS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row.get(k, "") for k in USER_CSV_FIELDS})
+    os.replace(tmp_path, ALERT_USER_CSV)
+
+def is_user_entry_enabled(row):
+    """True unless the row's Enabled column is explicitly falsy. Missing
+    or blank (e.g. a row saved before the Enabled column existed) counts
+    as enabled, so nothing silently stops being flagged after upgrading."""
+    val = (row.get("Enabled") or "").strip().lower()
+    return val not in ("0", "false", "no", "off")
 
 def read_user_entries():
     """Read alertdb/plane-alert-user.csv as a list of dicts, in file order."""
@@ -687,8 +837,10 @@ def query():
     cur_main.execute(sql, params)
     rows = cur_main.fetchall()
 
+    eastern_enabled = read_eastern_red_enabled()
+
     results = []
-    alert_lookup = {}  # ICAO24 -> "mil"/"gov", for rows found in the alert watchlists
+    alert_lookup = {}  # ICAO24 -> "mil"/"gov"/"civ"/"eastern", for flagged rows
     for row in rows:
         icao = row[0]
         cur_base.execute("SELECT Registration, ICAOTypeCode FROM Aircraft WHERE ModeS = ?", (icao,))
@@ -698,7 +850,7 @@ def query():
         results.append((icao, registration, ac_type) + row[1:])
         alert = ALERT_DB.get(icao)
         if alert:
-            alert_lookup[icao] = alert["category"]
+            alert_lookup[icao] = effective_alert_category(icao, alert["cmpg"], eastern_enabled)
 
     conn_main.close()
     conn_base.close()
@@ -718,6 +870,7 @@ def api_liveflights():
     feed's own reg/typ is blank for that aircraft, same as the results page."""
     conn_base = sqlite3.connect(SQB_DB_PATH)
     cur_base = conn_base.cursor()
+    eastern_enabled = read_eastern_red_enabled()
 
     with LIVE_SNAPSHOT_LOCK:
         snapshot_items = sorted(LIVE_SNAPSHOT.items())
@@ -746,7 +899,7 @@ def api_liveflights():
             "speed": ac["speed"],
             "lat": ac["lat"],
             "lon": ac["lon"],
-            "alert": alert["category"] if alert else None,
+            "alert": effective_alert_category(icao24, alert["cmpg"], eastern_enabled) if alert else None,
         })
 
     conn_base.close()
@@ -758,7 +911,13 @@ def api_liveflights():
 
 @app.route("/admin")
 def admin():
+    logged_in = bool(session.get("admin_logged_in"))
     entries = read_user_entries()
+    # The DB search box only renders when logged in, but a crafted URL
+    # could still pass ?db_q= while logged out - so gate it here too,
+    # not just by hiding the form.
+    db_query = request.args.get("db_q", "").strip() if logged_in else ""
+    db_results = []
 
     # Display only - never written back to plane-alert-user.csv. An entry
     # that only specifies an ICAO24 (or leaves Registration/Type blank)
@@ -775,21 +934,42 @@ def admin():
             reg_lookup = type_lookup = None
             if not e.get("$Registration") or not (e.get("$Type") or e.get("$ICAO Type")):
                 reg_lookup, type_lookup = lookup_basestation(cur_base, e.get("$ICAO", ""))
+            raw_cmpg = (e.get("#CMPG") or "").strip()
             rows.append({
                 "raw": e,
                 "display_registration": e.get("$Registration") or reg_lookup or "",
                 "display_type": e.get("$Type") or e.get("$ICAO Type") or type_lookup or "",
                 "reg_from_basestation": bool(reg_lookup) and not e.get("$Registration"),
                 "type_from_basestation": bool(type_lookup) and not (e.get("$Type") or e.get("$ICAO Type")),
+                "cmpg_label": CMPG_DISPLAY_LABELS.get(raw_cmpg, raw_cmpg or "—"),
+                "enabled": is_user_entry_enabled(e),
             })
+
+        if db_query:
+            # Same ICAO24-or-Registration, *-wildcard search as the main
+            # Search page, just narrower output (ICAO24/Registration/Type)
+            # and capped, since this is meant to help fill in the add-entry
+            # form above, not be a general query tool.
+            pattern = db_query.replace("*", "%")
+            cur_base.execute(
+                "SELECT ModeS, Registration, ICAOTypeCode FROM Aircraft "
+                "WHERE ModeS LIKE ? OR Registration LIKE ? LIMIT 50",
+                (pattern, pattern),
+            )
+            db_results = cur_base.fetchall()
     finally:
         conn_base.close()
 
     return render_template(
         "admin.html",
         rows=rows,
-        logged_in=bool(session.get("admin_logged_in")),
+        logged_in=logged_in,
         auth_configured=os.path.exists(DBAUTH_PATH),
+        eastern_red_enabled=read_eastern_red_enabled(),
+        allowed_cmpg=ALLOWED_CMPG,
+        cmpg_display_labels=CMPG_DISPLAY_LABELS,
+        db_query=db_query,
+        db_results=db_results,
     )
 
 @app.route("/admin/login", methods=["POST"])
@@ -817,23 +997,32 @@ def admin_save():
         flash("ICAO24 is required and must be a valid hex code.")
         return redirect(url_for("admin"))
 
+    cmpg = request.form.get("cmpg", "").strip()
+    if cmpg not in ALLOWED_CMPG:
+        cmpg = "Civ"
+
     row = {
         "$ICAO": icao,
         "$Registration": request.form.get("registration", "").strip(),
         "$Operator": request.form.get("operator", "").strip(),
         "$Type": request.form.get("type", "").strip(),
         "$ICAO Type": request.form.get("icao_type", "").strip(),
-        "#CMPG": request.form.get("cmpg", "").strip(),
+        "#CMPG": cmpg,
         "$Tag 1": request.form.get("tag1", "").strip(),
         "$#Tag 2": request.form.get("tag2", "").strip(),
         "$#Tag 3": request.form.get("tag3", "").strip(),
         "Category": request.form.get("category", "").strip(),
         "$#Link": request.form.get("link", "").strip(),
+        "Enabled": "1",
     }
 
     entries = read_user_entries()
     for i, existing in enumerate(entries):
         if (existing.get("$ICAO") or "").strip().upper().zfill(6) == icao:
+            # Editing an existing entry shouldn't silently re-enable a row
+            # the user had deliberately disabled - carry its current
+            # Enabled state forward instead of resetting to "1".
+            row["Enabled"] = existing.get("Enabled") or "1"
             entries[i] = row
             break
     else:
@@ -850,6 +1039,28 @@ def admin_remove():
     remaining = [e for e in entries if (e.get("$ICAO") or "").strip().upper().zfill(6) != icao]
     write_user_entries(remaining)
     flash(f"Removed {icao}. Click Apply to make it active for flagging.")
+    return redirect(url_for("admin"))
+
+@app.route("/admin/toggle_enabled", methods=["POST"])
+@login_required
+def admin_toggle_enabled():
+    icao = request.form.get("icao", "").strip().upper().zfill(6)
+    entries = read_user_entries()
+    for e in entries:
+        if (e.get("$ICAO") or "").strip().upper().zfill(6) == icao:
+            currently_enabled = is_user_entry_enabled(e)
+            e["Enabled"] = "0" if currently_enabled else "1"
+            write_user_entries(entries)
+            flash(f"{icao} {'disabled' if currently_enabled else 'enabled'}. Click Apply to make it active for flagging.")
+            break
+    return redirect(url_for("admin"))
+
+@app.route("/admin/settings", methods=["POST"])
+@login_required
+def admin_settings():
+    enabled = request.form.get("eastern_red_enabled") == "1"
+    write_eastern_red_enabled(enabled)
+    flash(f"\"Show flagged eastern planes as red\" {'enabled' if enabled else 'disabled'}.")
     return redirect(url_for("admin"))
 
 @app.route("/admin/reload", methods=["POST"])
