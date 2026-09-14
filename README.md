@@ -20,8 +20,9 @@ At a glance, modes_logger currently gives you:
   callsign (wildcards supported), by exact or partial date, and/or by a
   maximum last-seen altitude.
 - **A live view** (`/liveflights`) of everything currently being received,
-  auto-refreshing, with sortable columns and aviation-style altitude
-  formatting (flight levels, QNH altitudes).
+  auto-refreshing, with sortable columns, aviation-style altitude formatting
+  (flight levels, QNH altitudes), and QNH-corrected altitudes below the
+  transition altitude using a periodically-polled EFHK METAR.
 - **Military/Government/Civil watchlist alerts** — aircraft matched against
   the [plane-alert-db](https://github.com/sdr-enthusiasts/plane-alert-db)
   combined CSV are highlighted on both the Results and Live Flights pages by
@@ -348,16 +349,33 @@ flush against the header and get mistaken for it at a glance. Unchecking
 the box instantly reverts the filter, the row size, and the gap together.
 
 Altitude and Selected Alt are shown in standard aviation shorthand instead
-of raw feet: at or above a 5000ft transition altitude (hardcoded in
-`liveflights.html`) as a flight level, e.g. `F370` for 37000ft; below it,
-Altitude shows the exact altitude in feet (e.g. `2800`) and Selected Alt
-shows a QNH-style altitude, e.g. `A030` for 3000ft. Selected Alt is the
-autopilot/FCU's selected altitude from MODE-S Enhanced Surveillance (EHS)
-data — only available for some aircraft, blank otherwise — and its raw
-value (often slightly off a round number, e.g. `36992`) is rounded to the
-nearest 100ft before display; sorting still uses the exact underlying
-value, unaffected by the rounding/formatting. Vert Rate is the vertical
-rate in feet per minute, straight from the feed.
+of raw feet: at or above a 5000ft transition altitude (`TRANSITION_ALTITUDE_FT`,
+also hardcoded to match in `liveflights.html`) as a flight level, e.g. `F370`
+for 37000ft; below it, Altitude shows the exact altitude in feet (e.g.
+`2800`) and Selected Alt shows a QNH-style altitude, e.g. `A030` for 3000ft.
+Selected Alt is the autopilot/FCU's selected altitude from MODE-S Enhanced
+Surveillance (EHS) data — only available for some aircraft, blank
+otherwise — and its raw value (often slightly off a round number, e.g.
+`36992`) is rounded to the nearest 100ft before display; sorting still uses
+the exact underlying value, unaffected by the rounding/formatting. Vert
+Rate is the vertical rate in feet per minute, straight from the feed.
+
+Below the transition altitude, Altitude is also corrected for local
+barometric pressure rather than shown as raw 1013.25hPa pressure altitude:
+`modes-logger.py` polls a QNH value for EFHK (Helsinki-Vantaa) every
+`QNH_FETCH_INTERVAL_SECONDS` (10 minutes by default) from NOAA's plain-text
+METAR feed for the station, and `/api/liveflights` reports the latest known
+value alongside its own staleness. The browser applies the correction —
+`corrected = raw + (QNH − 1013.25) × 27 ft/hPa`, the standard-atmosphere
+figure rather than the rounded 30ft/hPa pilot shortcut — only below the
+transition altitude; Selected Alt is deliberately left uncorrected, since
+it's the pilot's own MCP/FCU target rather than a sensor reading, so
+correcting it would misrepresent what's actually selected. A small status
+line under the page's "last updated" line shows the current state: green
+"Altitude correction in use (QNH ### hPa)" once a usable value has been
+fetched, or amber "Altitude correction timeout" if a QNH hasn't been
+fetched yet, the feed request failed, or the last known value is older than
+`QNH_MAX_AGE_SECONDS` (2 hours by default).
 
 Latitude and Longitude are combined into one Lat/Lon column, e.g.
 `60.349 25.102`, rounded to 3 decimal places (roughly 100m of precision) —
@@ -418,6 +436,12 @@ All tunable settings live as constants near the top of `modes-logger.py`:
 | `DBAUTH_PATH` | `<script dir>/dbauth.txt` | Admin page login credentials (one line, `username:passwd`) |
 | `ADMIN_SETTINGS_PATH` | `<script dir>/admin_settings.json` | Stores the "Show flagged eastern planes as red" toggle state; created automatically the first time it's changed |
 | `LIVE_PAGE_REFRESH_SECONDS` | `10` | How often `/liveflights` polls `/api/liveflights` for fresh data |
+| `METAR_STATION_ICAO` | `EFHK` | Station whose METAR is polled for QNH altitude correction |
+| `QNH_FETCH_INTERVAL_SECONDS` | `600` (10 minutes) | How often the background poller refreshes QNH from NOAA's METAR feed |
+| `QNH_FETCH_TIMEOUT_SECONDS` | `10` | Timeout for each QNH fetch attempt |
+| `QNH_MAX_AGE_SECONDS` | `7200` (2 hours) | How old the last successfully-fetched QNH can be before altitude correction reports "timeout" |
+| `QNH_MIN_HPA` / `QNH_MAX_HPA` | `850` / `1085` | Sanity bounds a parsed QNH must fall within to be accepted |
+| `TRANSITION_ALTITUDE_FT` | `5000` | Altitude at/above which no QNH correction is applied (matches the flight-level cutoff used for display, both server- and client-side) |
 
 ## Database schema
 

@@ -22,6 +22,11 @@
     --link-text: #004f7c;
     /* Toggle button icon: a plain dark blue moon in light mode. */
     --icon-color: #0d3450;
+    /* Small status-line text colors (e.g. Live Flights' QNH altitude
+       correction line) - success/warning, kept legible against --bg in
+       both themes. */
+    --success-text: #1e7d34;
+    --warning-text: #b3541e;
 }
 
 [data-theme="dark"] {
@@ -41,6 +46,8 @@
     --link-text: #6cb6e8;
     /* Toggle button icon: a plain white/light sun in dark mode. */
     --icon-color: #eef1f4;
+    --success-text: #5fbf7a;
+    --warning-text: #e0954f;
 }
 
 /* Simple, flat box (not a bright/filled circle) that blends with the page

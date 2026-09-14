@@ -34,6 +34,17 @@
             color: var(--subtitle-text);
             margin-top: -8px;
         }
+        #qnh-status {
+            text-align: center;
+            font-size: 11px;
+            margin-top: -6px;
+        }
+        #qnh-status.in-use {
+            color: var(--success-text);
+        }
+        #qnh-status.timeout {
+            color: var(--warning-text);
+        }
         .table-wrapper {
             overflow: auto;
             margin-top: 20px;
@@ -136,6 +147,7 @@
     <a href="{{ url_for('home') }}" class="nav-button" title="Open Search page">Search</a>
     <h1>MODE-S & ADS-B Live Flights</h1>
     <p class="subtitle" id="status">Loading…</p>
+    <p id="qnh-status"></p>
     <div class="flagged-filter">
         <label><input type="checkbox" id="flagged-only"> Show only flagged</label>
     </div>
@@ -181,9 +193,21 @@
         // number), so it's rounded to the nearest 100ft first.
         const TRANSITION_ALTITUDE_FT = 5000;
 
+        // QNH altitude correction: raw altitude from the feed is always
+        // pressure altitude (referenced to the standard 1013.25 hPa), so
+        // below the transition altitude it's corrected against the
+        // server's latest known EFHK QNH to show a realistic altitude.
+        // 27 ft per hPa is the standard-atmosphere-derived figure (not the
+        // rounded "30 ft/hPa" pilot mental-math shortcut). Selected Alt is
+        // deliberately left uncorrected - it's the pilot's own MCP/FCU
+        // target, not a sensor reading.
+        const QNH_STD_HPA = 1013.25;
+        const QNH_FT_PER_HPA = 27;
+
         // Default: lowest altitude on top when the page is first opened.
         let sortState = { key: 'altitude', dir: 'asc' };
         let currentData = [];
+        let currentQnh = { hpa: null, status: 'timeout', updated_utc: null };
         let flaggedOnly = false;
 
         function applyFlaggedFilter(data) {
@@ -205,6 +229,19 @@
             const sign = rounded < 0 ? '-' : '';
             const label = rounded >= TRANSITION_ALTITUDE_FT ? 'F' : 'A';
             return sign + label + String(level).padStart(3, '0');
+        }
+
+        // Corrects a raw (pressure) altitude against the current QNH, when
+        // a usable one is available and the aircraft is below the
+        // transition altitude - above it, altitude is always shown/flown
+        // as a flight level regardless of QNH, so it's returned unchanged.
+        // Called once per aircraft per refresh (see refresh()) so both
+        // rendering and sorting see the same corrected value.
+        function correctedAltitude(rawFt, qnh) {
+            if (rawFt === null || rawFt === undefined || rawFt === '') return rawFt;
+            if (rawFt >= TRANSITION_ALTITUDE_FT) return rawFt;
+            if (!qnh || qnh.status !== 'in_use' || qnh.hpa === null || qnh.hpa === undefined) return rawFt;
+            return Math.round(rawFt + (qnh.hpa - QNH_STD_HPA) * QNH_FT_PER_HPA);
         }
 
         function formatAltitude(value) {
@@ -329,6 +366,17 @@
             }
         }
 
+        function updateQnhStatus() {
+            const el = document.getElementById('qnh-status');
+            if (currentQnh.status === 'in_use') {
+                el.textContent = 'Altitude correction in use (QNH ' + currentQnh.hpa + ' hPa)';
+                el.className = 'in-use';
+            } else {
+                el.textContent = 'Altitude correction timeout';
+                el.className = 'timeout';
+            }
+        }
+
         async function refresh() {
             const status = document.getElementById('status');
             try {
@@ -336,12 +384,18 @@
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
                 currentData = data.aircraft;
+                currentQnh = data.qnh || { hpa: null, status: 'timeout', updated_utc: null };
                 // Precomputed once per refresh so sortData/compareValues can
-                // treat "distance" like any other numeric field on ac.
-                currentData.forEach(ac => { ac.distance = distanceFromEfhkNm(ac.lat, ac.lon); });
+                // treat "distance"/"altitude" like any other numeric field
+                // on ac, and so rendering and sorting always agree.
+                currentData.forEach(ac => {
+                    ac.distance = distanceFromEfhkNm(ac.lat, ac.lon);
+                    ac.altitude = correctedAltitude(ac.altitude, currentQnh);
+                });
                 lastUpdatedUtc = data.updated_utc;
                 renderCurrent();
                 updateStatus();
+                updateQnhStatus();
             } catch (err) {
                 status.textContent = 'Update failed: ' + err.message;
             }

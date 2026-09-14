@@ -2,11 +2,14 @@ import csv
 import hmac
 import json
 import os
+import re
 import secrets
 import socket
 import sqlite3
 import threading
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime
 from functools import wraps
 from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
@@ -104,6 +107,23 @@ ADMIN_SETTINGS_PATH = os.path.join(BASE_DIR, "admin_settings.json")
 
 LIVE_PAGE_REFRESH_SECONDS = 10   # how often liveflights.html polls /api/liveflights
 
+# QNH altitude correction: raw ADS-B altitude is always pressure altitude
+# (referenced to 1013.25 hPa), so below the transition altitude it needs
+# correcting against the current local QNH to show a realistic altitude.
+# Source is NOAA's plain-text METAR feed for the given station - just two
+# lines (a fetch timestamp and the raw METAR string), parsed for the
+# "Q####" QNH group. Polled periodically in the background (see
+# poll_qnh_data) rather than fetched per-request, so a slow/failed fetch
+# never blocks a page load.
+METAR_STATION_ICAO = "EFHK"
+METAR_URL = f"https://tgftp.nws.noaa.gov/data/observations/metar/stations/{METAR_STATION_ICAO}.TXT"
+QNH_FETCH_INTERVAL_SECONDS = 600     # how often to poll NOAA for a fresh METAR
+QNH_FETCH_TIMEOUT_SECONDS = 10
+QNH_MAX_AGE_SECONDS = 7200           # older than this counts as stale/unusable
+QNH_MIN_HPA = 850                    # sanity bounds - reject obviously bogus parses
+QNH_MAX_HPA = 1085
+TRANSITION_ALTITUDE_FT = 5000        # matches liveflights.html's own FL/ft cutoff
+
 # ---------------- Shared in-memory state ----------------
 # ALERT_DB: ICAO24 -> {"source": "official"/"user", "cmpg": "mil"/"gov"/"civ",
 # "registration":, "operator":, "type":}. "source" is the trust axis (does
@@ -124,6 +144,15 @@ ALERT_DB_LOCK = threading.Lock()
 # out of range disappears from it as soon as one poll no longer reports it.
 LIVE_SNAPSHOT = {}
 LIVE_SNAPSHOT_LOCK = threading.Lock()
+
+# QNH_STATE: the most recent successfully-parsed QNH value for
+# METAR_STATION_ICAO, plus when it was fetched - used by
+# api_liveflights() to report a correction status ("in_use"/"timeout")
+# without every request having to reason about staleness itself. Only
+# ever updated wholesale by poll_qnh_data(); a failed fetch just leaves
+# the previous value in place until it ages past QNH_MAX_AGE_SECONDS.
+QNH_STATE = {"hpa": None, "fetched_at_epoch": None, "updated_utc": None}
+QNH_LOCK = threading.Lock()
 
 # ---------------- Helpers ----------------
 def now_pair():
@@ -562,6 +591,57 @@ def fetch_adsb_data():
             print(f"Error fetching ADS-B JSON data: {e}")
         time.sleep(FETCH_INTERVAL)
 
+def fetch_qnh_hpa():
+    """Fetch and parse the current QNH (in hPa) for METAR_STATION_ICAO from
+    NOAA's plain-text METAR feed. Raises on any failure (network error,
+    unexpected format, missing/out-of-range Q-group) - callers decide what
+    to do about that; this function never touches QNH_STATE itself."""
+    req = urllib.request.Request(
+        METAR_URL,
+        headers={"User-Agent": "modes_logger/1.0 (QNH altitude correction)"},
+    )
+    with urllib.request.urlopen(req, timeout=QNH_FETCH_TIMEOUT_SECONDS) as resp:
+        raw = resp.read().decode("utf-8", errors="replace")
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    if len(lines) < 2:
+        raise ValueError(f"Unexpected METAR response format: {raw!r}")
+    metar = lines[1]
+    match = re.search(r"\bQ(\d{4})\b", metar)
+    if not match:
+        raise ValueError(f"No QNH (Q####) group found in METAR: {metar!r}")
+    hpa = int(match.group(1))
+    if not (QNH_MIN_HPA <= hpa <= QNH_MAX_HPA):
+        raise ValueError(f"Parsed QNH {hpa} hPa out of sane range from METAR: {metar!r}")
+    return hpa
+
+def poll_qnh_data():
+    """Background loop: periodically refresh QNH_STATE from NOAA. A failed
+    fetch is logged and simply leaves the previous value in place - it
+    naturally becomes "timeout" once it ages past QNH_MAX_AGE_SECONDS,
+    handled at read time by get_qnh_status() rather than here."""
+    while True:
+        try:
+            hpa = fetch_qnh_hpa()
+            with QNH_LOCK:
+                QNH_STATE["hpa"] = hpa
+                QNH_STATE["fetched_at_epoch"] = time.time()
+                QNH_STATE["updated_utc"] = datetime.utcnow().strftime("%H:%M:%S")
+        except Exception as e:
+            print(f"Error fetching QNH data for {METAR_STATION_ICAO}: {e}")
+        time.sleep(QNH_FETCH_INTERVAL_SECONDS)
+
+def get_qnh_status():
+    """Current QNH value plus a status ("in_use"/"timeout") for the JSON
+    API - "timeout" covers both a stale last-known value and never having
+    fetched one successfully yet."""
+    with QNH_LOCK:
+        hpa = QNH_STATE["hpa"]
+        fetched_at = QNH_STATE["fetched_at_epoch"]
+        updated_utc = QNH_STATE["updated_utc"]
+    if hpa is None or fetched_at is None or (time.time() - fetched_at) > QNH_MAX_AGE_SECONDS:
+        return {"hpa": hpa, "status": "timeout", "updated_utc": updated_utc}
+    return {"hpa": hpa, "status": "in_use", "updated_utc": updated_utc}
+
 def upsert_basestation_registration(conn, icao24, registration, actype):
     """Insert/update Registration + ICAOTypeCode in BaseStation.sqb from the
     live JSON feed. Only writes when something is actually new or different,
@@ -907,6 +987,7 @@ def api_liveflights():
         "aircraft": aircraft_out,
         "count": len(aircraft_out),
         "updated_utc": datetime.utcnow().strftime("%H:%M:%S"),
+        "qnh": get_qnh_status(),
     })
 
 @app.route("/admin")
@@ -1088,4 +1169,5 @@ if __name__ == "__main__":
     sync_alert_db_to_basestation()
     from threading import Thread
     Thread(target=fetch_adsb_data, daemon=True).start()
+    Thread(target=poll_qnh_data, daemon=True).start()
     app.run(debug=True, host="172.26.1.162", port=5000)
