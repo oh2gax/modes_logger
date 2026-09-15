@@ -266,14 +266,18 @@ box) — kept deliberately compact so it still fits comfortably on a phone
 screen. The search form has four fields, all optional and combinable:
 
 - **Search by** — a dropdown choosing what "Search value" matches against:
-  `ICAO24` (the default), `Registration`, or `Callsign`. All three accept
-  the `*` wildcard (translated to SQL's `%` under the hood), e.g. `15*` for
-  ICAO24 or `OH-*` for registration. Registration matching looks the value
+  `Registration` (the default), `ICAO24`, or `Callsign`. All three accept
+  the `*` wildcard (translated to SQL's `%` under the hood), e.g. `OH-*` for
+  registration or `15*` for ICAO24. Registration matching looks the value
   up in `BaseStation.sqb` first, then filters the flight history by the
   ICAO24 hexes found there — since registration itself isn't stored in
-  `adsb_data.db`. Callsign matching checks both `FirstCallsign` and
-  `LastCallsign`, since a callsign occasionally isn't decoded until partway
-  through a flight.
+  `adsb_data.db`. Registration is the default because the app now resolves
+  it for almost all traffic automatically; if a registration search comes
+  back with no matches, the Results page suggests trying ICAO24 instead, in
+  case that aircraft has been logged but its registration hasn't been
+  resolved into `BaseStation.sqb` yet. Callsign matching checks both
+  `FirstCallsign` and `LastCallsign`, since a callsign occasionally isn't
+  decoded until partway through a flight.
 - **Date** — matched as a substring against both `FirstDateTime` and
   `LastDateTime` (which are stored as `dd-mm-yyyy HH:MM`), so a full date
   like `12-09-2026` matches that exact day, while a partial value like
@@ -281,7 +285,11 @@ screen. The search form has four fields, all optional and combinable:
   timestamp (i.e. any day in February 2025). The small calendar icon next
   to the field is just a convenience — clicking a date in the picker fills
   the text field in `dd-mm-yyyy` format, but the field stays a plain,
-  freely-editable text input, so partial searches still work afterward.
+  freely-editable text input, so partial searches still work afterward. A
+  bare year (`2026`) or month+year (`09-2026`) on its own — without an
+  ICAO24, Registration, or Callsign value to narrow it — is rejected with an
+  on-page message instead of running, since it would otherwise scan and
+  return a large fraction of the whole flight history at once.
 - **Max last altitude** — filters to flights whose `LastAltitude` is
   strictly below the given value (in feet); leave it blank to not filter by
   altitude at all.
@@ -289,8 +297,10 @@ screen. The search form has four fields, all optional and combinable:
   currently on the official watchlist or your own watchlist (see below),
   combinable with any of the fields above.
 
-Leaving every field at its default (ICAO24 search with an empty value)
-returns the entire flight history, oldest first.
+Leaving every field at its default (Registration search with an empty
+value) returns the entire flight history, oldest first. A **Clear** button
+next to Search resets every field back to this default state without
+running a search — handy for starting over between different lookups.
 
 ### Results page (`/query`)
 
@@ -314,7 +324,10 @@ the left, so you can keep track of which row is which while scrolling
 sideways through the rest of the columns. When "Show only flagged" was
 checked and no watchlist matches were found, the column headers still show
 (so you can see the search ran) with a "No flagged planes found" note
-underneath instead of an empty table.
+underneath instead of an empty table. A Registration search that finds no
+matches shows its own note instead, suggesting a search by ICAO24, since the
+aircraft may already be logged under its ICAO24 even if its registration
+hasn't been resolved into `BaseStation.sqb` yet.
 
 Click the First DateTime, Last DateTime, First Altitude, or Last Altitude
 column headers to sort by that column (click again to reverse direction) —

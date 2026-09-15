@@ -27,6 +27,7 @@
         h1 {
             text-align: center;
             color: var(--header-bg);
+            margin-top: 44px;
         }
         .subtitle {
             text-align: center;
@@ -185,8 +186,12 @@
         </tbody>
     </table>
     </div>
-    {% if flagged_only and not results %}
+    {% if date_too_broad %}
+    <p class="no-results">Please narrow your search — searching an entire year or month needs an ICAO24, Registration, or Callsign value too.</p>
+    {% elif flagged_only and not results %}
     <p class="no-results">No flagged planes found</p>
+    {% elif not flagged_only and not results and search_field == 'registration' and search_value %}
+    <p class="no-results">No matches found for registration "{{ search_value }}" — if it hasn't been resolved into the database yet, the aircraft may still be logged under its ICAO24 instead. Try searching by ICAO24.</p>
     {% endif %}
     <script>
         // Client-side re-sorting of the already-rendered table: no new

@@ -134,20 +134,36 @@
             margin: 0;
             accent-color: var(--header-bg);
         }
-        button[type="submit"] {
+        .button-row {
+            display: flex;
+            gap: 8px;
+            margin-top: 4px;
+        }
+        button[type="submit"], button[type="reset"] {
             font-family: inherit;
             font-size: 13px;
             font-weight: 600;
-            color: var(--header-text);
-            background-color: var(--header-bg);
             border: none;
             border-radius: 8px;
             padding: 9px 22px;
             cursor: pointer;
-            margin-top: 4px;
+        }
+        button[type="submit"] {
+            color: var(--header-text);
+            background-color: var(--header-bg);
         }
         button[type="submit"]:hover {
             opacity: 0.9;
+        }
+        /* Secondary/outlined style - resets the form to its default state
+           without submitting, for starting a fresh search over. */
+        button[type="reset"] {
+            color: var(--text);
+            background-color: transparent;
+            border: 1px solid var(--border);
+        }
+        button[type="reset"]:hover {
+            background-color: var(--row-alt-bg);
         }
     </style>
 
@@ -167,8 +183,8 @@
             <label for="search_field">Search by:</label>
             <div class="field-row">
                 <select id="search_field" name="search_field">
-                    <option value="icao24" selected>ICAO24</option>
-                    <option value="registration">Registration</option>
+                    <option value="icao24">ICAO24</option>
+                    <option value="registration" selected>Registration</option>
                     <option value="callsign">Callsign</option>
                 </select>
 
@@ -198,7 +214,10 @@
             </label>
         </div>
 
-        <button type="submit">Search</button>
+        <div class="button-row">
+            <button type="submit">Search</button>
+            <button type="reset">Clear</button>
+        </div>
 
     </form>
 

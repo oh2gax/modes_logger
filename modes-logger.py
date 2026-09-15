@@ -856,13 +856,41 @@ app.secret_key = secrets.token_hex(32)
 def home():
     return render_template("index.html")
 
+# A "date" filter this broad - a bare year ("2026") or a bare month+year
+# ("09-2026") - matches almost every row of a large history on its own,
+# since it's just a substring match against FirstDateTime/LastDateTime (see
+# query() below). Harmless when it's narrowing an already-specific search
+# (an ICAO24/Registration/Callsign value), but expensive and rarely useful
+# alone, so it's only blocked when search_value is empty too.
+BARE_YEAR_RE = re.compile(r"^\d{4}$")              # e.g. "2026"
+BARE_MONTH_YEAR_RE = re.compile(r"^\d{2}-\d{4}$")  # e.g. "09-2026"
+
+def date_filter_too_broad(date_value):
+    """True for a date filter broad enough to match a whole year or month
+    of history on its own - only meaningful when search_value is empty."""
+    return bool(BARE_YEAR_RE.match(date_value) or BARE_MONTH_YEAR_RE.match(date_value))
+
 @app.route("/query", methods=["GET"])
 def query():
-    search_field = request.args.get("search_field", "icao24").strip().lower()
+    # Registration matches the form's own default "Search by" selection -
+    # the database resolves registrations for almost all traffic now, so
+    # it's the more useful bare-fallback than ICAO24 (only relevant if
+    # /query is ever hit directly without a search_field param at all).
+    search_field = request.args.get("search_field", "registration").strip().lower()
     search_value = request.args.get("search_value", "").strip()
     date = request.args.get("date", "").strip()
     max_altitude = request.args.get("max_altitude", "").strip()
     flagged_only = request.args.get("flagged_only", "").strip()
+
+    if date and not search_value and date_filter_too_broad(date):
+        # Refuse before even opening the database - a bare year/month
+        # search with nothing else to narrow it would otherwise scan and
+        # return a large fraction of the whole flight history.
+        return render_template(
+            "results.html", results=[], alert_lookup={},
+            flagged_only=bool(flagged_only), date_too_broad=True,
+            search_field=search_field, search_value=search_value,
+        )
 
     conn_main = sqlite3.connect(DB_NAME)
     cur_main = conn_main.cursor()
@@ -942,7 +970,8 @@ def query():
     conn_base.close()
     return render_template(
         "results.html", results=results, alert_lookup=alert_lookup,
-        flagged_only=bool(flagged_only)
+        flagged_only=bool(flagged_only), date_too_broad=False,
+        search_field=search_field, search_value=search_value,
     )
 
 @app.route("/liveflights")
