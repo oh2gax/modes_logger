@@ -4,6 +4,13 @@ All notable changes to this project are documented here, grouped by date
 (newest first). Multiple changes made on the same day are listed together
 under that day's heading.
 
+## 2026-09-15
+
+### Added
+- Results page: a small "Search" and "Live" nav button next to the light/dark toggle (top-left corner), matching the pair of buttons already on the Search and Live Flights pages — previously this was the only page missing a quick way back to the other two.
+- Results page: First DateTime, Last DateTime, First Altitude, and Last Altitude column headers are now clickable to sort (click again to reverse direction), the same way the Live Flights page's columns work — entirely in the browser, re-ordering the already-loaded table with no page reload. First/Last DateTime sort by true chronological order (their underlying `FirstEpoch`/`LastEpoch`, not the displayed `dd-mm-yyyy HH:MM` text); First/Last Altitude sort by their real numeric value, with a blank altitude always sorting to the bottom regardless of direction. The page still opens in its original default order (oldest Last DateTime first).
+- Results page: clicking the `#` column now toggles "flagged first" — flagged aircraft (military/government/civil watchlist or your own) move to the top of the table, each group still ordered oldest Last DateTime first, with everything else following in the normal default order below them. Clicking `#` again turns it back off; clicking any other sortable column also cancels it and does a normal single-column sort instead.
+
 ## 2026-09-14
 
 ### Added

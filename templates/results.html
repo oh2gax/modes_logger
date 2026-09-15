@@ -105,17 +105,31 @@
             background-color: var(--header-bg);
             color: var(--header-text);
         }
+        th[data-sort] {
+            cursor: pointer;
+        }
+        th[data-sort]:hover {
+            text-decoration: underline;
+        }
+        /* Second nav button (Live) sits to the right of the first (Search),
+           both to the right of the theme toggle - see .nav-button in
+           theme.css for the shared base styling. */
+        .nav-button-2 {
+            left: 108px;
+        }
     </style>
 </head>
 <body>
     <button id="theme-toggle" class="theme-toggle" title="Toggle light/dark mode" aria-label="Toggle light/dark mode"></button>
+    <a href="{{ url_for('home') }}" class="nav-button" title="Open Search page">Search</a>
+    <a href="{{ url_for('liveflights') }}" class="nav-button nav-button-2" title="Open Live Flights page">Live</a>
     <h1>MODE-S & ADS-B Query Results</h1>
     <p class="subtitle">Times in UTC</p>
     <div class="table-wrapper">
     <table>
         <thead>
             <tr>
-                <th class="numbering">#</th>
+                <th class="numbering" data-sort="flagged" title="Click to show flagged aircraft first">#</th>
                 <th class="sticky-col">Registration</th>
                 <th>ICAO24</th>
                 <th>Aircraft Type</th>
@@ -123,25 +137,30 @@
                 <th>First Squawk</th>
                 <th>First Lat</th>
                 <th>First Lon</th>
-                <th>First Altitude</th>
+                <th data-sort="first_altitude">First Altitude</th>
                 <th>First Track</th>
                 <th>First Speed</th>
-                <th>First DateTime</th>
+                <th data-sort="first_datetime">First DateTime</th>
                 <th>Last Callsign</th>
                 <th>Last Squawk</th>
                 <th>Last Lat</th>
                 <th>Last Lon</th>
-                <th>Last Altitude</th>
+                <th data-sort="last_altitude">Last Altitude</th>
                 <th>Last Track</th>
                 <th>Last Speed</th>
-                <th>Last DateTime</th>
+                <th data-sort="last_datetime">Last DateTime</th>
             </tr>
         </thead>
-        <tbody>
+        <tbody id="results-tbody">
             {% for row in results %}
             {% set alert = alert_lookup.get(row[0]) %}
-            <tr class="{{ 'mil-alert' if alert == 'mil' else ('gov-alert' if alert == 'gov' else ('civ-alert' if alert == 'civ' else ('eastern-alert' if alert == 'eastern' else ''))) }}">
-                <td>{{ loop.index }}</td>
+            <tr class="{{ 'mil-alert' if alert == 'mil' else ('gov-alert' if alert == 'gov' else ('civ-alert' if alert == 'civ' else ('eastern-alert' if alert == 'eastern' else ''))) }}"
+                data-flagged="{{ '1' if alert else '0' }}"
+                data-first-epoch="{{ row[19] }}"
+                data-last-epoch="{{ row[20] }}"
+                data-first-altitude="{{ row[7] if row[7] is not none else '' }}"
+                data-last-altitude="{{ row[15] if row[15] is not none else '' }}">
+                <td class="row-number">{{ loop.index }}</td>
                 <td class="sticky-col">{{ row[1] }}</td>   <!-- Registration -->
                 <td>{{ row[0] }}</td>   <!-- ICAO24 -->
                 <td>{{ row[2] }}</td>   <!-- Aircraft Type -->
@@ -169,6 +188,112 @@
     {% if flagged_only and not results %}
     <p class="no-results">No flagged planes found</p>
     {% endif %}
+    <script>
+        // Client-side re-sorting of the already-rendered table: no new
+        // request, current scroll position and search filters are
+        // untouched. Rows are just detached/reordered in the DOM - their
+        // cell content is never regenerated - so this only needs to know
+        // each row's sort-relevant values, carried as data-* attributes
+        // (see results.html's <tr> above). FirstDateTime/LastDateTime sort
+        // by the underlying FirstEpoch/LastEpoch (a "dd-mm-yyyy HH:MM"
+        // string wouldn't sort chronologically); First/Last Altitude sort
+        // by their real numeric value, blank ones always last.
+        const SORT_LABELS = {
+            first_datetime: 'First DateTime',
+            last_datetime: 'Last DateTime',
+            first_altitude: 'First Altitude',
+            last_altitude: 'Last Altitude',
+        };
+        const SORT_DATA_KEY = {
+            first_datetime: 'firstEpoch',
+            last_datetime: 'lastEpoch',
+            first_altitude: 'firstAltitude',
+            last_altitude: 'lastAltitude',
+        };
+
+        // Default matches the page's own server-rendered order (oldest
+        // Last DateTime first), so the arrow shown on load matches reality
+        // without needing an extra initial sort pass.
+        let sortState = { key: 'last_datetime', dir: 'asc' };
+        let flaggedFirst = false;
+
+        function numOrNull(v) {
+            if (v === '' || v === undefined || v === null) return null;
+            const n = Number(v);
+            return Number.isNaN(n) ? null : n;
+        }
+
+        function sortRows(rows, key, dir) {
+            const dataKey = SORT_DATA_KEY[key];
+            const withBlanks = rows.filter(r => numOrNull(r.dataset[dataKey]) === null);
+            const withValues = rows.filter(r => !withBlanks.includes(r));
+            withValues.sort((a, b) => {
+                const cmp = Number(a.dataset[dataKey]) - Number(b.dataset[dataKey]);
+                return dir === 'asc' ? cmp : -cmp;
+            });
+            // Unknown values always sort to the bottom, in either direction.
+            return withValues.concat(withBlanks);
+        }
+
+        // "Flagged first": flagged rows as a group at the top, then
+        // everything else - each group in its own oldest-Last-DateTime-first
+        // order, regardless of whatever column sort was previously active.
+        function flaggedFirstOrder(rows) {
+            const flagged = rows.filter(r => r.dataset.flagged === '1');
+            const rest = rows.filter(r => r.dataset.flagged !== '1');
+            return sortRows(flagged, 'last_datetime', 'asc').concat(sortRows(rest, 'last_datetime', 'asc'));
+        }
+
+        function renderOrder() {
+            const tbody = document.getElementById('results-tbody');
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            const ordered = flaggedFirst ? flaggedFirstOrder(rows) : sortRows(rows, sortState.key, sortState.dir);
+            ordered.forEach((tr, i) => {
+                tr.querySelector('.row-number').textContent = i + 1;
+                tbody.appendChild(tr); // moves the existing row, doesn't clone it
+            });
+        }
+
+        function updateHeaderIndicators() {
+            document.querySelectorAll('th[data-sort]').forEach(th => {
+                const key = th.dataset.sort;
+                if (key === 'flagged') {
+                    th.textContent = flaggedFirst ? '# ★' : '#';
+                    return;
+                }
+                const arrow = (!flaggedFirst && sortState.key === key) ? (sortState.dir === 'asc' ? ' ▲' : ' ▼') : '';
+                th.textContent = SORT_LABELS[key] + arrow;
+            });
+        }
+
+        document.querySelectorAll('th[data-sort]').forEach(th => {
+            th.addEventListener('click', () => {
+                const key = th.dataset.sort;
+                if (key === 'flagged') {
+                    flaggedFirst = !flaggedFirst;
+                    if (flaggedFirst) {
+                        // Turning it on always resets to the default
+                        // oldest-Last-DateTime ordering used within each
+                        // group; turning it off falls back to that same
+                        // default view too.
+                        sortState = { key: 'last_datetime', dir: 'asc' };
+                    }
+                } else {
+                    flaggedFirst = false;
+                    if (sortState.key === key) {
+                        sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        sortState.key = key;
+                        sortState.dir = 'asc';
+                    }
+                }
+                updateHeaderIndicators();
+                renderOrder();
+            });
+        });
+
+        updateHeaderIndicators();
+    </script>
     <script src="{{ url_for('static', filename='theme.js') }}"></script>
 </body>
 </html>

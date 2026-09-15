@@ -289,6 +289,9 @@ returns the entire flight history, oldest first.
 
 ### Results page (`/query`)
 
+A "Search" and "Live" button next to the light/dark toggle (top-left corner)
+jump back to the Search page and straight to the Live Flights page.
+
 Shows every matching flight as one row, oldest first (by `LastEpoch`),
 numbered, with Registration/Aircraft Type joined in from `BaseStation.sqb`
 at query time (shown as "Not Found" when that ICAO24 isn't in there yet).
@@ -307,6 +310,22 @@ sideways through the rest of the columns. When "Show only flagged" was
 checked and no watchlist matches were found, the column headers still show
 (so you can see the search ran) with a "No flagged planes found" note
 underneath instead of an empty table.
+
+Click the First DateTime, Last DateTime, First Altitude, or Last Altitude
+column headers to sort by that column (click again to reverse direction) —
+entirely in the browser, instantly re-ordering the already-loaded table with
+no page reload, the same way the Live Flights page's columns work. The
+DateTime columns sort by true chronological order rather than the displayed
+text; the Altitude columns sort by their real numeric value, with a blank
+altitude always sorting to the bottom regardless of direction. The page
+still opens in its original default order (oldest Last DateTime first).
+
+Clicking the `#` column header toggles "flagged first": every flagged
+aircraft (military/government/civil watchlist, or your own) moves to the
+top of the table, itself ordered oldest Last DateTime first, with every
+other row following below in that same default order. Click `#` again to
+turn it back off; clicking any other sortable column header also cancels it
+and switches to a normal single-column sort instead.
 
 ### Live Flights page (`/liveflights`)
 

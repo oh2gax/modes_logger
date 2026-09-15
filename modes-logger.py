@@ -869,10 +869,16 @@ def query():
     conn_base = sqlite3.connect(SQB_DB_PATH)
     cur_base = conn_base.cursor()
 
+    # FirstEpoch/LastEpoch are appended at the end (not interleaved with the
+    # displayed First*/Last* fields) purely so results.html can sort rows by
+    # true chronological order client-side - FirstDateTime/LastDateTime are
+    # stored as "dd-mm-yyyy HH:MM" text, which doesn't sort correctly as a
+    # plain string. They're passed to the template as row[19]/row[20], used
+    # only as hidden data-* attributes, never displayed.
     sql = (
         "SELECT ICAO24, FirstCallsign, FirstSquawk, FirstLat, FirstLon, FirstAltitude, "
         "       FirstTrack, FirstSpeed, FirstDateTime, LastCallsign, LastSquawk, LastLat, LastLon, "
-        "       LastAltitude, LastTrack, LastSpeed, LastDateTime "
+        "       LastAltitude, LastTrack, LastSpeed, LastDateTime, FirstEpoch, LastEpoch "
         "FROM aircraft WHERE 1=1"
     )
     params = []
