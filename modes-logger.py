@@ -60,6 +60,16 @@ ALERT_MASTER_CSV = os.path.join(ALERTDB_DIR, "plane-alert-db.csv")
 ALERT_GOV_CSV = os.path.join(ALERTDB_DIR, "plane-alert-gov.csv")
 ALERT_MIL_CSV = os.path.join(ALERTDB_DIR, "plane-alert-mil.csv")
 
+# Fourth source: a military-only extract derived from the tar1090-db /
+# Mictronics aircraft database (github.com/wiedehopf/tar1090-db), the
+# database most dump1090/readsb/tar1090 setups use for hex -> registration/
+# type lookups. Same 11-column layout as the plane-alert-db files above, so
+# it's loaded the same way - it just happens to add a large number of
+# ICAO24s the official plane-alert-db lists don't have yet, with #CMPG
+# always "Mil" and little else beyond $Type/$ICAO Type filled in (no
+# $Operator, no tags/category/link).
+TAR1090_MIL_CSV = os.path.join(ALERTDB_DIR, "tar1090-military.csv")
+
 # User-maintained watchlist, edited from the /admin page (see below). Same
 # columns as the upstream CSVs, plus one of our own, "Enabled" - so it can
 # also be opened and hand-edited in a spreadsheet. Only $ICAO is required
@@ -345,8 +355,14 @@ def load_alert_db():
     plane-alert-mil.csv files (every row in those two is byte-identical to
     its counterpart here), so those two are only kept as a fallback for
     anything the master file might be missing, and contribute nothing once
-    it's present. Whichever official file an ICAO24 is first found in
-    wins over a later one, since they're never expected to disagree.
+    it's present. tar1090-military.csv is loaded last of the official
+    sources - it's a much larger, separately-sourced military extract that
+    mostly doesn't overlap the plane-alert-db lists at all, so it's there to
+    add coverage rather than to agree or disagree with them; on the rare
+    ICAO24 that does appear in an earlier file too, the earlier (more
+    curated) entry wins, same as between the other official files.
+    Whichever official file an ICAO24 is first found in wins over a later
+    one, since they're never expected to meaningfully disagree.
 
     plane-alert-user.csv is always loaded last and always overwrites, so a
     personal watchlist entry takes precedence over an official one for the
@@ -365,7 +381,7 @@ def load_alert_db():
     global ALERT_DB
     alert_db = {}
 
-    for path in (ALERT_MASTER_CSV, ALERT_GOV_CSV, ALERT_MIL_CSV):
+    for path in (ALERT_MASTER_CSV, ALERT_GOV_CSV, ALERT_MIL_CSV, TAR1090_MIL_CSV):
         if not os.path.exists(path):
             print(f"Alert DB: {path} not found, skipping")
             continue

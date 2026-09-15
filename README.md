@@ -120,6 +120,15 @@ Drop `plane-alert-db.csv` — the combined watchlist CSV from the
   both, any ICAO24 already loaded from it is left alone — this also quietly
   handles the duplicate entries you'd otherwise get between the master file
   and its own older derivatives.
+- a fourth, optional file, `tar1090-military.csv`, is loaded last of the
+  official sources. It's a military-only extract from the
+  [tar1090-db / Mictronics](https://github.com/wiedehopf/tar1090-db)
+  aircraft database — the one most dump1090/readsb/tar1090 setups use for
+  hex → registration/type lookups — in the same 11-column layout as the
+  files above, so it's picked up the same way. It mostly doesn't overlap
+  `plane-alert-db.csv` at all, so it's there to add coverage rather than to
+  agree or disagree with it; on the rare ICAO24 that does appear in an
+  earlier file too, that earlier, more-curated entry wins.
 - their Registration/Aircraft Type values are written into `BaseStation.sqb`
   for those ICAO24s, since these manually-curated lists are treated as more
   trustworthy than whatever the live feed itself reports. A later live
@@ -127,7 +136,7 @@ Drop `plane-alert-db.csv` — the combined watchlist CSV from the
   — the same as any other aircraft — so this is "the CSV wins at startup,"
   not a permanent lock.
 
-All three files are optional: a missing one is logged and skipped rather
+All four files are optional: a missing one is logged and skipped rather
 than crashing the app. Since the project only reads them at startup (or
 when the admin page's Apply button is used), update the CSVs and
 restart/Apply to pick up changes.
@@ -539,6 +548,12 @@ The Military/Government/Civil watchlist CSV used in `alertdb/` (see
 [plane-alert-db](https://github.com/sdr-enthusiasts/plane-alert-db) project.
 Thanks to its maintainers and contributors for compiling and maintaining
 that data.
+
+The optional `tar1090-military.csv` source is derived from the
+[tar1090-db / Mictronics](https://github.com/wiedehopf/tar1090-db) aircraft
+database (maintained at [mictronics.de](https://www.mictronics.de/aircraft-database/)),
+the standard hex → registration/type database used by most dump1090/readsb/
+tar1090 setups. Thanks to its maintainers and contributors as well.
 
 ## License
 
