@@ -21,3 +21,8 @@ __pycache__/
 *.pyc
 venv/
 .venv/
+
+# Files delivered to chat by Claude (e.g. design-preview screenshots) get
+# auto-saved here by the desktop app when this folder is connected — not
+# part of the project itself, never committed
+Claude outputs/
