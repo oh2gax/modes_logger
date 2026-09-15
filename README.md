@@ -34,6 +34,12 @@ At a glance, modes_logger currently gives you:
   exactly like the official lists, an Enabled tickbox to temporarily pull an
   entry out of flagging without deleting it, and a small BaseStation.sqb
   search tool to help you find an ICAO24/registration to add.
+- **A BaseStation.sqb database editor** — also on the admin page, a separate
+  section for directly adding, modifying, or deleting an entry in
+  `BaseStation.sqb` itself (ICAO24, Registration, ICAO Type), for when you
+  already know a plane's details before it's ever come through the live
+  feed. Every change is confirmed before it's made, since it edits a shared
+  database other ADS-B tools may also read.
 - **"Show flagged eastern planes as red"** — an admin-page toggle that
   recolors any *already-flagged* aircraft red when its ICAO24 falls in
   Russia's Mode-S allocation block, regardless of its Mil/Gov/Civ color.
@@ -218,6 +224,25 @@ also has its own small search tool for `BaseStation.sqb` itself — search by
 ICAO24 or Registration (wildcards supported) to find a plane the app has
 already logged, then click **Use** to drop its ICAO24/Registration/Type
 straight into the add/edit form above.
+
+That same search tool's results also have **Edit** and **Delete** buttons,
+for a separate **Database editor** section at the very bottom of the admin
+page (below the Apply button). This is a direct editor for
+`BaseStation.sqb`'s `Aircraft` table itself — not the watchlist — with just
+three fields: ICAO24, Registration, and ICAO Type, for the case where you
+already know an aircraft's registration/type before it's ever come through
+the live feed (e.g. you know a plane's tail number but it hasn't flown past
+the receiver yet). Typing in a new ICAO24 and saving adds it; typing in one
+that's already in the database and saving overwrites it, including clearing
+a field back to blank if you empty it out — this is a deliberate human
+correction, so unlike the live feed's own writes (which never clear a value
+that's already known), it always writes exactly what's in the form.
+Clicking **Edit** on a search result scrolls down and pre-fills this form;
+clicking **Delete** removes that entry immediately. Every add, modify, or
+delete asks for confirmation first, summarizing exactly what's about to be
+written or removed — since, unlike the watchlist above, this directly edits
+the same shared `BaseStation.sqb` file other ADS-B tools may also be
+reading — and takes effect immediately, with no Apply step needed.
 
 Matches from this list are highlighted the same way as the official
 lists — light blue/light green/light amber by CMPG — and are included in
@@ -460,7 +485,10 @@ BaseStation.sqb search tool, and use the **Apply** button that reloads all
 watchlists for flagging purposes. An entry that's missing Registration/Type
 but matches an aircraft already known in `BaseStation.sqb` shows those values
 in italics for reference — looked up on the fly, never written into the
-CSV itself.
+CSV itself. A separate **Database editor** section at the bottom of the
+page lets you add, modify, or delete an entry in `BaseStation.sqb` directly
+(ICAO24, Registration, ICAO Type) — each change confirmed before it's made
+and applied immediately, no Apply step needed.
 
 ### Light/dark mode
 

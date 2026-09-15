@@ -1293,6 +1293,78 @@ def admin_reload():
     flash(f"Reloaded - {len(ALERT_DB)} total watchlist entries active.")
     return redirect(url_for("admin"))
 
+@app.route("/admin/db_save", methods=["POST"])
+@login_required
+def admin_db_save():
+    """Add or modify a BaseStation.sqb entry directly, from the admin page's
+    Database editor. Unlike upsert_basestation_registration (the live feed's
+    blank-tolerant helper, which never clears an existing value), this writes
+    exactly what's in the form - including blanking a field the user emptied
+    out - since a human is knowingly correcting the data here, not passively
+    enriching it from a partial feed record. Takes effect immediately; no
+    Apply/reload needed since this doesn't touch the watchlist."""
+    icao = request.form.get("db_icao", "").strip().upper().zfill(6)
+    if not icao or len(icao) != 6:
+        flash("ICAO24 is required and must be a valid hex code.")
+        return redirect(url_for("admin") + "#db-search")
+
+    registration = request.form.get("db_registration", "").strip()
+    actype = request.form.get("db_type", "").strip()
+
+    conn = sqlite3.connect(SQB_DB_PATH)
+    try:
+        cur = conn.cursor()
+        # Existence check by ModeS only, same as upsert_basestation_registration
+        # and lookup_basestation elsewhere in the app - the production
+        # BaseStation.sqb's Aircraft table doesn't necessarily have an
+        # AircraftID column (its schema predates this app / isn't always the
+        # one init_basestation_db() would create), so nothing here can rely
+        # on it existing.
+        cur.execute("SELECT 1 FROM Aircraft WHERE ModeS = ?", (icao,))
+        existing = cur.fetchone()
+        if existing is None:
+            cur.execute(
+                "INSERT INTO Aircraft (ModeS, Registration, ICAOTypeCode) VALUES (?, ?, ?)",
+                (icao, registration, actype),
+            )
+            flash(f"Added {icao} to BaseStation.sqb.")
+        else:
+            cur.execute(
+                "UPDATE Aircraft SET Registration = ?, ICAOTypeCode = ? WHERE ModeS = ?",
+                (registration, actype, icao),
+            )
+            flash(f"Updated {icao} in BaseStation.sqb.")
+        conn.commit()
+    finally:
+        conn.close()
+    return redirect(url_for("admin") + "#db-search")
+
+@app.route("/admin/db_delete", methods=["POST"])
+@login_required
+def admin_db_delete():
+    """Delete a BaseStation.sqb entry directly, from the admin page's
+    Database editor. Confirmed client-side (see the db-delete-form submit
+    handler in admin.html) before this route is ever hit, since this edits a
+    shared database other ADS-B tools also read."""
+    icao = request.form.get("db_icao", "").strip().upper().zfill(6)
+    if not icao or len(icao) != 6:
+        flash("ICAO24 is required and must be a valid hex code.")
+        return redirect(url_for("admin") + "#db-search")
+
+    conn = sqlite3.connect(SQB_DB_PATH)
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM Aircraft WHERE ModeS = ?", (icao,))
+        deleted = cur.rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    if deleted:
+        flash(f"Deleted {icao} from BaseStation.sqb.")
+    else:
+        flash(f"{icao} was not found in BaseStation.sqb.")
+    return redirect(url_for("admin") + "#db-search")
+
 # ---------------- Main ----------------
 if __name__ == "__main__":
     init_db()
