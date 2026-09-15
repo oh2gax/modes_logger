@@ -11,6 +11,9 @@ under that day's heading.
 - Results page: First DateTime, Last DateTime, First Altitude, and Last Altitude column headers are now clickable to sort (click again to reverse direction), the same way the Live Flights page's columns work — entirely in the browser, re-ordering the already-loaded table with no page reload. First/Last DateTime sort by true chronological order (their underlying `FirstEpoch`/`LastEpoch`, not the displayed `dd-mm-yyyy HH:MM` text); First/Last Altitude sort by their real numeric value, with a blank altitude always sorting to the bottom regardless of direction. The page still opens in its original default order (oldest Last DateTime first).
 - Results page: clicking the `#` column now toggles "flagged first" — flagged aircraft (military/government/civil watchlist or your own) move to the top of the table, each group still ordered oldest Last DateTime first, with everything else following in the normal default order below them. Clicking `#` again turns it back off; clicking any other sortable column also cancels it and does a normal single-column sort instead.
 
+### Changed
+- Search page: the form gained a lighter, more modern look — rounded input/select boxes with refined padding and a highlighted border on focus, each field's label on its own line above it, and box widths sized to what they actually hold (a narrow Max last altitude box instead of an oversized generic one, the ICAO24/Registration/Callsign dropdown sitting beside the search value instead of stacked full-width). Same fields, same labels, same one-filter-per-row layout as before — just refined, and still just as compact on a phone. The page title and form now sit flush left under the theme toggle and Live button, matching the rest of the site, instead of centered on the page.
+
 ## 2026-09-14
 
 ### Added

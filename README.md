@@ -258,7 +258,12 @@ Open the site in a browser to use the three pages described below.
 A small "Live" button next to the light/dark toggle (top-left corner) jumps
 straight to the Live Flights page.
 
-The search form has four fields, all optional and combinable:
+The form itself is a simple, one-filter-per-row layout with a lightly
+modernized look — rounded input/select boxes, a label above each field, and
+each box sized to what it actually holds (e.g. a narrow Max last altitude
+box, the ICAO24/Registration/Callsign dropdown sitting beside its value
+box) — kept deliberately compact so it still fits comfortably on a phone
+screen. The search form has four fields, all optional and combinable:
 
 - **Search by** — a dropdown choosing what "Search value" matches against:
   `ICAO24` (the default), `Registration`, or `Callsign`. All three accept

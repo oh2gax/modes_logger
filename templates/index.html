@@ -32,13 +32,68 @@
             padding: 20px;
         }
         h1 {
-            text-align: center;
+            text-align: left;
             color: var(--header-bg);
+            font-size: 19px;
+            margin-top: 44px;
         }
         a {
             color: var(--link-text);
         }
 
+        /* Modernized form: same fields/labels/one-item-per-row structure as
+           before, just refined sizing, spacing, and borders instead of bare
+           default browser inputs. Kept narrow and centered so it stays
+           compact on both desktop and phone widths. */
+        form {
+            max-width: 320px;
+            margin: 20px 0 0 0;
+        }
+        .field-group {
+            margin-bottom: 14px;
+        }
+        .field-group label {
+            display: block;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--subtitle-text);
+            margin-bottom: 5px;
+            letter-spacing: 0.02em;
+        }
+        .field-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        input, select {
+            font-family: inherit;
+            font-size: 13px;
+            color: var(--text);
+            background-color: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 10px;
+            box-sizing: border-box;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--header-bg);
+            box-shadow: 0 0 0 2px var(--row-alt-bg);
+        }
+        /* Search by / Search value: one logical row - dropdown sized to
+           its own short options, text value taking the remaining space. */
+        #search_field {
+            flex: 0 0 108px;
+        }
+        #search_value {
+            flex: 1 1 140px;
+            min-width: 0;
+        }
+        /* Date: just wide enough for "dd-mm-yyyy" plus the picker icon
+           beside it - was an oversized generic text box before. */
+        #date {
+            flex: 0 0 108px;
+        }
         /* Narrow "icon-only" date picker button next to the free-text date
            field - hides the native text/spinner parts in WebKit/Blink
            browsers (Chrome, Edge, Safari) so just the calendar icon shows.
@@ -59,6 +114,41 @@
         input[type="date"].date-picker-icon::-webkit-calendar-picker-indicator {
             padding: 0;
         }
+        /* Max last altitude: a real altitude value is at most 6 digits -
+           no reason for it to stretch as wide as the other fields did. */
+        #max_altitude {
+            flex: 0 0 90px;
+        }
+        .checkbox-row label {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            font-size: 13px;
+            font-weight: normal;
+            color: var(--text);
+            cursor: pointer;
+        }
+        .checkbox-row input[type="checkbox"] {
+            width: 15px;
+            height: 15px;
+            margin: 0;
+            accent-color: var(--header-bg);
+        }
+        button[type="submit"] {
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--header-text);
+            background-color: var(--header-bg);
+            border: none;
+            border-radius: 8px;
+            padding: 9px 22px;
+            cursor: pointer;
+            margin-top: 4px;
+        }
+        button[type="submit"]:hover {
+            opacity: 0.9;
+        }
     </style>
 
 </head>
@@ -73,32 +163,35 @@
 
     <form action="/query" method="get">
 
-        <div style="margin-bottom: 8px;">
+        <div class="field-group">
             <label for="search_field">Search by:</label>
+            <div class="field-row">
+                <select id="search_field" name="search_field">
+                    <option value="icao24" selected>ICAO24</option>
+                    <option value="registration">Registration</option>
+                    <option value="callsign">Callsign</option>
+                </select>
 
-            <select id="search_field" name="search_field">
-                <option value="icao24" selected>ICAO24</option>
-                <option value="registration">Registration</option>
-                <option value="callsign">Callsign</option>
-            </select>
-
-            <input type="text" id="search_value" name="search_value" placeholder="* wildcard allowed">
+                <input type="text" id="search_value" name="search_value" placeholder="* wildcard allowed">
+            </div>
         </div>
 
-        <div style="margin-bottom: 8px;">
+        <div class="field-group">
             <label for="date">Date (dd-mm-yyyy):</label>
-
-            <input type="text" id="date" name="date" size="11">
-            <input type="date" id="date_picker" class="date-picker-icon" title="Pick a date" aria-label="Pick a date from a calendar">
+            <div class="field-row">
+                <input type="text" id="date" name="date">
+                <input type="date" id="date_picker" class="date-picker-icon" title="Pick a date" aria-label="Pick a date from a calendar">
+            </div>
         </div>
 
-        <div style="margin-bottom: 8px;">
+        <div class="field-group">
             <label for="max_altitude">Max last altitude:</label>
-
-            <input type="number" id="max_altitude" name="max_altitude">
+            <div class="field-row">
+                <input type="number" id="max_altitude" name="max_altitude">
+            </div>
         </div>
 
-        <div style="margin-bottom: 8px;">
+        <div class="field-group checkbox-row">
             <label for="flagged_only">
                 <input type="checkbox" id="flagged_only" name="flagged_only" value="1">
                 Show only flagged
