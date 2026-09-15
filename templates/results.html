@@ -189,9 +189,9 @@
     {% if date_too_broad %}
     <p class="no-results">Please narrow your search — searching an entire year or month needs an ICAO24, Registration, or Callsign value too.</p>
     {% elif range_incomplete %}
-    <p class="no-results">Please provide both Start Date and End Date to search a date range.</p>
+    <p class="no-results">Please also enter a Date (dd-mm-yyyy) to pair with End Date — it becomes the start of the range.</p>
     {% elif range_invalid %}
-    <p class="no-results">Please enter valid Start Date and End Date values (dd-mm-yyyy), with Start Date on or before End Date.</p>
+    <p class="no-results">Please enter a valid Date and End Date (dd-mm-yyyy each), with Date being one specific day — not just a month or year — on or before End Date.</p>
     {% elif range_too_broad %}
     <p class="no-results">Please narrow your search — a date range longer than 7 days needs an ICAO24, Registration, or Callsign value too.</p>
     {% elif flagged_only and not results %}

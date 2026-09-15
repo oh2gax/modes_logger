@@ -872,7 +872,7 @@ def date_filter_too_broad(date_value):
 
 DATE_DDMMYYYY_RE = re.compile(r"^\d{2}-\d{2}-\d{4}$")
 
-# A Start/End Date range up to this many days (inclusive of both boundary
+# A Date/End Date range up to this many days (inclusive of both boundary
 # days) is short enough to run on its own - e.g. with just "Show only
 # flagged" - without an ICAO24/Registration/Callsign value to narrow it.
 # A longer range still needs one, same reasoning as the bare year/month
@@ -883,7 +883,7 @@ RANGE_FREE_MAX_DAYS = 7
 def parse_ddmmyyyy_bounds(date_str):
     """Parse a dd-mm-yyyy date string into (start-of-day epoch, end-of-day
     epoch, midnight datetime), or None if it isn't a valid dd-mm-yyyy date.
-    Used for the Start/End Date range search below, where the range needs
+    Used for the Date/End Date range search below, where the range needs
     to cover each boundary day in full (a flight at 22:00 on the End Date
     should still match), not just the literal midnight instant a bare date
     implies. The midnight datetime is kept alongside so the range's span in
@@ -908,29 +908,33 @@ def query():
     search_field = request.args.get("search_field", "registration").strip().lower()
     search_value = request.args.get("search_value", "").strip()
     date = request.args.get("date", "").strip()
-    start_date = request.args.get("start_date", "").strip()
     end_date = request.args.get("end_date", "").strip()
     max_altitude = request.args.get("max_altitude", "").strip()
     flagged_only = request.args.get("flagged_only", "").strip()
 
-    # Start/End Date range search - mutually exclusive with the plain Date
-    # field above: filling in either Start or End switches the query into
-    # range mode for this request and the plain Date substring filter (if
-    # also filled in) is ignored entirely, rather than trying to combine a
-    # substring match with a real date range.
-    range_active = bool(start_date or end_date)
+    # End Date range search - End Date alone switches the query into range
+    # mode, with the existing Date field doing double duty as the range's
+    # start day rather than a separate Start Date field. That means Date
+    # has to be one specific day (dd-mm-yyyy) once End Date is set, not the
+    # bare year/month it's allowed to be on its own (see date_filter_too_broad
+    # below) - a month or year isn't a usable start point for a real range.
+    range_active = bool(end_date)
     range_incomplete = False
     range_invalid = False
     range_too_broad = False
     range_start_epoch = range_end_epoch = None
 
     if range_active:
-        if not (start_date and end_date):
-            # Only one of the two given - a range needs both ends to mean
-            # anything, so refuse rather than guessing an open-ended range.
+        if not date:
+            # End Date with nothing in Date to pair with it - a range needs
+            # a concrete start day, so refuse rather than guessing one.
             range_incomplete = True
+        elif date_filter_too_broad(date):
+            # Date is a bare year/month, not a specific day - fine on its
+            # own, but not usable as a range's start.
+            range_invalid = True
         else:
-            start_bounds = parse_ddmmyyyy_bounds(start_date)
+            start_bounds = parse_ddmmyyyy_bounds(date)
             end_bounds = parse_ddmmyyyy_bounds(end_date)
             if not start_bounds or not end_bounds or start_bounds[0] > end_bounds[1]:
                 range_invalid = True
@@ -999,11 +1003,11 @@ def query():
         sql += " AND ICAO24 LIKE ?"
         params.append(search_value.replace("*", "%"))
     if range_active and range_start_epoch is not None:
-        # Overlap match: the flight was active at some point between the
-        # two dates - its First DateTime is on/before End Date AND its Last
-        # DateTime is on/after Start Date. Catches flights that started
-        # before the window or were still going after it, not just ones
-        # entirely contained within it.
+        # Overlap match: the flight was active at some point between Date
+        # (acting as the range's start day here) and End Date - its First
+        # DateTime is on/before End Date AND its Last DateTime is on/after
+        # Date. Catches flights that started before the window or were
+        # still going after it, not just ones entirely contained within it.
         sql += " AND FirstEpoch <= ? AND LastEpoch >= ?"
         params.extend([range_end_epoch, range_start_epoch])
     elif date:

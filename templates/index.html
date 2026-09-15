@@ -207,20 +207,12 @@
         </div>
 
         <div class="field-group">
-            <label for="start_date">Start Date (dd-mm-yyyy):</label>
-            <div class="field-row">
-                <input type="text" id="start_date" name="start_date">
-                <input type="date" id="start_date_picker" class="date-picker-icon" title="Pick a start date" aria-label="Pick a start date from a calendar">
-            </div>
-        </div>
-
-        <div class="field-group">
             <label for="end_date">End Date (dd-mm-yyyy):</label>
             <div class="field-row">
                 <input type="text" id="end_date" name="end_date">
                 <input type="date" id="end_date_picker" class="date-picker-icon" title="Pick an end date" aria-label="Pick an end date from a calendar">
             </div>
-            <div class="field-hint">Up to 7 days works on its own (e.g. with Show only flagged); a longer range needs an ICAO24, Registration, or Callsign too. Overrides the Date field above.</div>
+            <div class="field-hint">Adding this searches a range: Date above becomes the start (must be one specific day, not just a month or year). Up to 7 days works on its own (e.g. with Show only flagged); a longer range needs an ICAO24, Registration, or Callsign too.</div>
         </div>
 
         <div class="field-group">
@@ -249,10 +241,9 @@
     <script>
         // Native date input value is yyyy-mm-dd; each search box uses
         // dd-mm-yyyy and stays freely editable/partial afterward. Same sync
-        // logic for all three date fields (Date, Start Date, End Date).
+        // logic for both date fields (Date, End Date).
         [
             ['date_picker', 'date'],
-            ['start_date_picker', 'start_date'],
             ['end_date_picker', 'end_date'],
         ].forEach(([pickerId, targetId]) => {
             document.getElementById(pickerId).addEventListener('change', function () {
