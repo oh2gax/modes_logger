@@ -263,7 +263,8 @@ modernized look — rounded input/select boxes, a label above each field, and
 each box sized to what it actually holds (e.g. a narrow Max last altitude
 box, the ICAO24/Registration/Callsign dropdown sitting beside its value
 box) — kept deliberately compact so it still fits comfortably on a phone
-screen. The search form has four fields, all optional and combinable:
+screen. The search form has five fields (six counting Start/End Date as one
+pair), all optional and combinable:
 
 - **Search by** — a dropdown choosing what "Search value" matches against:
   `Registration` (the default), `ICAO24`, or `Callsign`. All three accept
@@ -290,6 +291,20 @@ screen. The search form has four fields, all optional and combinable:
   ICAO24, Registration, or Callsign value to narrow it — is rejected with an
   on-page message instead of running, since it would otherwise scan and
   return a large fraction of the whole flight history at once.
+- **Start Date / End Date** — a real date range instead of the Date field's
+  substring match, each with its own calendar-icon picker, filled in
+  `dd-mm-yyyy` the same way. A flight matches if it was active at any point
+  during the range — First DateTime on/before End Date and Last DateTime
+  on/after Start Date — so a flight that started before the range or ran
+  past it still shows up if it was in the air at some point inside it.
+  Filling in either field switches the search into range mode: both Start
+  and End are required together (an on-page message explains if only one is
+  set, or if Start is after End), and the plain Date field above is ignored
+  for that search rather than combined with it. A range of up to 7 days can
+  be searched on its own — e.g. with just "Show only flagged", to check the
+  last few days for anything flagged — but a longer range needs an ICAO24,
+  Registration, or Callsign value too, same reasoning as the bare year/month
+  protection above.
 - **Max last altitude** — filters to flights whose `LastAltitude` is
   strictly below the given value (in feet); leave it blank to not filter by
   altitude at all.

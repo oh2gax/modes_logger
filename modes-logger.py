@@ -10,7 +10,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
 
@@ -870,6 +870,35 @@ def date_filter_too_broad(date_value):
     of history on its own - only meaningful when search_value is empty."""
     return bool(BARE_YEAR_RE.match(date_value) or BARE_MONTH_YEAR_RE.match(date_value))
 
+DATE_DDMMYYYY_RE = re.compile(r"^\d{2}-\d{2}-\d{4}$")
+
+# A Start/End Date range up to this many days (inclusive of both boundary
+# days) is short enough to run on its own - e.g. with just "Show only
+# flagged" - without an ICAO24/Registration/Callsign value to narrow it.
+# A longer range still needs one, same reasoning as the bare year/month
+# guard above: unbounded, it could scan and return a large fraction of the
+# whole flight history.
+RANGE_FREE_MAX_DAYS = 7
+
+def parse_ddmmyyyy_bounds(date_str):
+    """Parse a dd-mm-yyyy date string into (start-of-day epoch, end-of-day
+    epoch, midnight datetime), or None if it isn't a valid dd-mm-yyyy date.
+    Used for the Start/End Date range search below, where the range needs
+    to cover each boundary day in full (a flight at 22:00 on the End Date
+    should still match), not just the literal midnight instant a bare date
+    implies. The midnight datetime is kept alongside so the range's span in
+    whole days can be measured by calendar date, not epoch arithmetic,
+    which would be one off around a DST transition."""
+    if not DATE_DDMMYYYY_RE.match(date_str):
+        return None
+    try:
+        day_start = datetime.strptime(date_str, "%d-%m-%Y")
+    except ValueError:
+        return None
+    start_epoch = int(day_start.timestamp())
+    end_epoch = int((day_start + timedelta(days=1)).timestamp()) - 1
+    return start_epoch, end_epoch, day_start
+
 @app.route("/query", methods=["GET"])
 def query():
     # Registration matches the form's own default "Search by" selection -
@@ -879,16 +908,56 @@ def query():
     search_field = request.args.get("search_field", "registration").strip().lower()
     search_value = request.args.get("search_value", "").strip()
     date = request.args.get("date", "").strip()
+    start_date = request.args.get("start_date", "").strip()
+    end_date = request.args.get("end_date", "").strip()
     max_altitude = request.args.get("max_altitude", "").strip()
     flagged_only = request.args.get("flagged_only", "").strip()
 
-    if date and not search_value and date_filter_too_broad(date):
+    # Start/End Date range search - mutually exclusive with the plain Date
+    # field above: filling in either Start or End switches the query into
+    # range mode for this request and the plain Date substring filter (if
+    # also filled in) is ignored entirely, rather than trying to combine a
+    # substring match with a real date range.
+    range_active = bool(start_date or end_date)
+    range_incomplete = False
+    range_invalid = False
+    range_too_broad = False
+    range_start_epoch = range_end_epoch = None
+
+    if range_active:
+        if not (start_date and end_date):
+            # Only one of the two given - a range needs both ends to mean
+            # anything, so refuse rather than guessing an open-ended range.
+            range_incomplete = True
+        else:
+            start_bounds = parse_ddmmyyyy_bounds(start_date)
+            end_bounds = parse_ddmmyyyy_bounds(end_date)
+            if not start_bounds or not end_bounds or start_bounds[0] > end_bounds[1]:
+                range_invalid = True
+            else:
+                span_days = (end_bounds[2].date() - start_bounds[2].date()).days + 1
+                if not search_value and span_days > RANGE_FREE_MAX_DAYS:
+                    range_too_broad = True
+                else:
+                    range_start_epoch, range_end_epoch = start_bounds[0], end_bounds[1]
+
+    if date and not range_active and not search_value and date_filter_too_broad(date):
         # Refuse before even opening the database - a bare year/month
         # search with nothing else to narrow it would otherwise scan and
         # return a large fraction of the whole flight history.
         return render_template(
             "results.html", results=[], alert_lookup={},
             flagged_only=bool(flagged_only), date_too_broad=True,
+            range_incomplete=False, range_invalid=False, range_too_broad=False,
+            search_field=search_field, search_value=search_value,
+        )
+
+    if range_incomplete or range_invalid or range_too_broad:
+        return render_template(
+            "results.html", results=[], alert_lookup={},
+            flagged_only=bool(flagged_only), date_too_broad=False,
+            range_incomplete=range_incomplete, range_invalid=range_invalid,
+            range_too_broad=range_too_broad,
             search_field=search_field, search_value=search_value,
         )
 
@@ -929,7 +998,15 @@ def query():
         # Default: ICAO24
         sql += " AND ICAO24 LIKE ?"
         params.append(search_value.replace("*", "%"))
-    if date:
+    if range_active and range_start_epoch is not None:
+        # Overlap match: the flight was active at some point between the
+        # two dates - its First DateTime is on/before End Date AND its Last
+        # DateTime is on/after Start Date. Catches flights that started
+        # before the window or were still going after it, not just ones
+        # entirely contained within it.
+        sql += " AND FirstEpoch <= ? AND LastEpoch >= ?"
+        params.extend([range_end_epoch, range_start_epoch])
+    elif date:
         sql += " AND (FirstDateTime LIKE ? OR LastDateTime LIKE ?)"
         params.extend([f"%{date}%", f"%{date}%"])
     if max_altitude:
@@ -971,6 +1048,7 @@ def query():
     return render_template(
         "results.html", results=results, alert_lookup=alert_lookup,
         flagged_only=bool(flagged_only), date_too_broad=False,
+        range_incomplete=False, range_invalid=False, range_too_broad=False,
         search_field=search_field, search_value=search_value,
     )
 

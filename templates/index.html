@@ -60,6 +60,12 @@
             margin-bottom: 5px;
             letter-spacing: 0.02em;
         }
+        .field-hint {
+            font-size: 10px;
+            color: var(--subtitle-text);
+            margin-top: 5px;
+            line-height: 1.4;
+        }
         .field-row {
             display: flex;
             gap: 8px;
@@ -201,6 +207,23 @@
         </div>
 
         <div class="field-group">
+            <label for="start_date">Start Date (dd-mm-yyyy):</label>
+            <div class="field-row">
+                <input type="text" id="start_date" name="start_date">
+                <input type="date" id="start_date_picker" class="date-picker-icon" title="Pick a start date" aria-label="Pick a start date from a calendar">
+            </div>
+        </div>
+
+        <div class="field-group">
+            <label for="end_date">End Date (dd-mm-yyyy):</label>
+            <div class="field-row">
+                <input type="text" id="end_date" name="end_date">
+                <input type="date" id="end_date_picker" class="date-picker-icon" title="Pick an end date" aria-label="Pick an end date from a calendar">
+            </div>
+            <div class="field-hint">Up to 7 days works on its own (e.g. with Show only flagged); a longer range needs an ICAO24, Registration, or Callsign too. Overrides the Date field above.</div>
+        </div>
+
+        <div class="field-group">
             <label for="max_altitude">Max last altitude:</label>
             <div class="field-row">
                 <input type="number" id="max_altitude" name="max_altitude">
@@ -224,13 +247,20 @@
     <div id="results"></div>
 
     <script>
-        document.getElementById('date_picker').addEventListener('change', function () {
-            if (!this.value) return;
-            // Native date input value is yyyy-mm-dd; the search box uses
-            // dd-mm-yyyy and stays freely editable/partial afterward.
-            const parts = this.value.split('-');
-            const y = parts[0], m = parts[1], d = parts[2];
-            document.getElementById('date').value = d + '-' + m + '-' + y;
+        // Native date input value is yyyy-mm-dd; each search box uses
+        // dd-mm-yyyy and stays freely editable/partial afterward. Same sync
+        // logic for all three date fields (Date, Start Date, End Date).
+        [
+            ['date_picker', 'date'],
+            ['start_date_picker', 'start_date'],
+            ['end_date_picker', 'end_date'],
+        ].forEach(([pickerId, targetId]) => {
+            document.getElementById(pickerId).addEventListener('change', function () {
+                if (!this.value) return;
+                const parts = this.value.split('-');
+                const y = parts[0], m = parts[1], d = parts[2];
+                document.getElementById(targetId).value = d + '-' + m + '-' + y;
+            });
         });
     </script>
 
