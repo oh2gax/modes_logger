@@ -350,9 +350,9 @@ modernized look — rounded input/select boxes, a label above each field, and
 each box sized to what it actually holds (e.g. a narrow Max last altitude
 box, the ICAO24/Registration/Callsign dropdown sitting beside its value
 box) — kept deliberately compact so it still fits comfortably on a phone
-screen. The search form has five fields, all optional and combinable, plus a
-sixth that only appears when a legacy archive file is present (see "Legacy
-archive" above):
+screen. The search form has five fields (Date required, the rest optional
+and combinable), plus a sixth that only appears when a legacy archive file
+is present (see "Legacy archive" above):
 
 - **Search by** — a dropdown choosing what "Search value" matches against:
   `Registration` (the default), `ICAO24`, or `Callsign`. All three accept
@@ -367,17 +367,21 @@ archive" above):
   resolved into `BaseStation.sqb` yet. Callsign matching checks both
   `FirstCallsign` and `LastCallsign`, since a callsign occasionally isn't
   decoded until partway through a flight.
-- **Date** — matched as a substring against both `FirstDateTime` and
-  `LastDateTime` (which are stored as `dd-mm-yyyy HH:MM`), so a full date
-  like `12-09-2026` matches that exact day, while a partial value like
-  `02-2025` matches any flight with `02-2025` appearing anywhere in either
-  timestamp (i.e. any day in February 2025). The small calendar icon next
-  to the field is just a convenience — clicking a date in the picker fills
-  the text field in `dd-mm-yyyy` format, but the field stays a plain,
-  freely-editable text input, so partial searches still work afterward. A
-  bare year (`2026`) or month+year (`09-2026`) on its own — without an
-  ICAO24, Registration, or Callsign value to narrow it — is rejected with an
-  on-page message instead of running, since it would otherwise scan and
+- **Date** — required for every search, matched as a substring against both
+  `FirstDateTime` and `LastDateTime` (which are stored as `dd-mm-yyyy
+  HH:MM`), so a full date like `12-09-2026` matches that exact day, while a
+  partial value like `02-2025` matches any flight with `02-2025` appearing
+  anywhere in either timestamp (i.e. any day in February 2025). The small
+  calendar icon next to the field is just a convenience — clicking a date in
+  the picker fills the text field in `dd-mm-yyyy` format, but the field
+  stays a plain, freely-editable text input, so partial searches still work
+  afterward. Leaving Date empty is refused with an on-page message instead
+  of running, regardless of what else is filled in — Search value, Max last
+  altitude, and Show only flagged can only narrow an already-dated search,
+  they can't run on their own. A bare year (`2026`) or month+year
+  (`09-2026`) is a further step narrower still: on its own — without an
+  ICAO24, Registration, or Callsign value to narrow it too — it's also
+  rejected with its own on-page message, since it would otherwise scan and
   return a large fraction of the whole flight history at once.
 - **End Date** — filling this in switches the search into a real date range
   instead of Date's substring match, with its own calendar-icon picker,
@@ -398,23 +402,25 @@ archive" above):
   altitude at all.
 - **Show only flagged** — a checkbox that restricts results to ICAO24s
   currently on the official watchlist or your own watchlist (see below),
-  combinable with any of the fields above.
+  combinable with any of the fields above — but still needs Date filled in
+  too, same as every other search.
 - **Include legacy archive (2007–2023)** — only shown when a legacy archive
   file is present (see "Legacy archive" above). Pulls matching historical
   flights from that archive into the same results, but only when Search
   value and a single-year/month/day Date are also given — see "Legacy
   archive" above for exactly when it does and doesn't kick in.
 
-At least one of Search value, Date, or Show only flagged has to be filled
-in before a search runs. Leaving all three at their defaults — even with
-Max last altitude set — is refused with an on-page message instead of
-running, the same way the bare year/month case above is: an unfiltered
-search would otherwise scan the entire flight history and, for every single
-matching row, run a separate lookup query against `BaseStation.sqb`, which
-on a real history is enough individual queries to bring the app down rather
-than just being slow. A **Clear** button next to Search resets every field
-back to this default (blocked) state without running a search — handy for
-starting over between different lookups.
+Date has to be filled in before a search runs — Search value, Max last
+altitude, and Show only flagged only narrow an already-dated search, none of
+them (alone or combined) can substitute for it. Leaving Date empty is
+refused with an on-page message instead of running, the same way the bare
+year/month case above is: an unbounded search would otherwise scan the
+entire flight history and, for every single matching row, run a separate
+lookup query against `BaseStation.sqb`, which on a real history is enough
+individual queries to bring the app down rather than just being slow. A
+**Clear** button next to Search resets every field back to this default
+(blocked) state without running a search — handy for starting over between
+different lookups.
 
 ### Results page (`/query`)
 

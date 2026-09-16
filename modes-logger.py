@@ -1152,7 +1152,7 @@ def query():
             "results.html", results=[], alert_lookup={},
             flagged_only=bool(flagged_only), date_too_broad=True,
             range_incomplete=False, range_invalid=False, range_too_broad=False,
-            no_filter_too_broad=False,
+            date_required=False,
             search_field=search_field, search_value=search_value,
         )
 
@@ -1162,27 +1162,32 @@ def query():
             flagged_only=bool(flagged_only), date_too_broad=False,
             range_incomplete=range_incomplete, range_invalid=range_invalid,
             range_too_broad=range_too_broad,
-            no_filter_too_broad=False,
+            date_required=False,
             search_field=search_field, search_value=search_value,
         )
 
-    if not search_value and not date and not flagged_only:
-        # Nothing at all to narrow the search by - the SQL itself
-        # ("WHERE 1=1", no clauses added) would scan the entire aircraft
-        # table, and every single matched row then triggers its own extra
+    if not date:
+        # Date is now a hard requirement for every search, not just one of
+        # several ways to narrow it - Search value and Show only flagged no
+        # longer count as sufficient on their own. Without this, "Show only
+        # flagged" alone (unbounded by date) or a bare Search value alone
+        # could still each touch a large slice of the flight history, and -
+        # same root cause as the original crash this whole guard chain
+        # exists for - every single matched row then triggers its own extra
         # lookup query against BaseStation.sqb just below, one at a time.
         # On a flight history of any real size that's not just a big page
         # to render, it's tens or hundreds of thousands of individual SQL
-        # queries in a loop, which is what actually brought the app down
-        # rather than just being slow. Same refuse-before-touching-the-
-        # database approach as the bare year/month and overly-wide-range
-        # guards above; max_altitude alone doesn't count as narrow enough
-        # either, for the same reason it doesn't for those.
+        # queries in a loop. Same refuse-before-touching-the-database
+        # approach as the bare year/month and overly-wide-range guards
+        # above; max_altitude doesn't count toward this requirement either,
+        # for the same reason it doesn't for those. (Range mode already
+        # enforces this via range_incomplete above, before ever reaching
+        # here, so this only fires for the non-range case.)
         return render_template(
             "results.html", results=[], alert_lookup={},
             flagged_only=bool(flagged_only), date_too_broad=False,
             range_incomplete=False, range_invalid=False, range_too_broad=False,
-            no_filter_too_broad=True,
+            date_required=True,
             search_field=search_field, search_value=search_value,
         )
 
@@ -1319,7 +1324,7 @@ def query():
         "results.html", results=results, alert_lookup=alert_lookup,
         flagged_only=bool(flagged_only), date_too_broad=False,
         range_incomplete=False, range_invalid=False, range_too_broad=False,
-        no_filter_too_broad=False,
+        date_required=False,
         search_field=search_field, search_value=search_value,
         include_legacy=bool(include_legacy),
     )

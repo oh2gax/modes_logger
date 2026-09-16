@@ -186,8 +186,8 @@
         </tbody>
     </table>
     </div>
-    {% if no_filter_too_broad %}
-    <p class="no-results">Please narrow your search — enter an ICAO24, Registration, or Callsign value, a Date, or check "Show only flagged" before searching the entire flight history.</p>
+    {% if date_required %}
+    <p class="no-results">Please enter a Date before searching — a Date is required for every search, whether or not you also fill in Search value, Max last altitude, or Show only flagged.</p>
     {% elif date_too_broad %}
     <p class="no-results">Please narrow your search — searching an entire year or month needs an ICAO24, Registration, or Callsign value too.</p>
     {% elif range_incomplete %}
