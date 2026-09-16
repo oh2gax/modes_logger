@@ -45,7 +45,7 @@ LEGACY_DB_PATH = os.path.join(BASE_DIR, "BaseStation-legacy-2023.sqb")
 LEGACY_ARCHIVE_MIN_YEAR = 2007
 LEGACY_ARCHIVE_MAX_YEAR = 2023
 
-FETCH_INTERVAL = 10          # seconds between polls
+FETCH_INTERVAL = 5           # seconds between polls
 MIN_UPDATE_MINUTES = 2       # debounce: ignore Last*-updates inside this window
 FLIGHT_GAP_SECONDS = 3600    # >1 hour means a new flight
 
@@ -125,6 +125,30 @@ CMPG_DISPLAY_LABELS = {"Mil": "Military", "Gov": "Government", "Civ": "Civil"}
 RUSSIA_ICAO24_MIN = 0x100000
 RUSSIA_ICAO24_MAX = 0x1FFFFF
 
+# Universal ICAO emergency squawk codes - hijack, radio/communication
+# failure, and general emergency, respectively. Deliberately independent of
+# the Mil/Gov/Civ/eastern watchlist logic above: any aircraft can squawk
+# one of these regardless of whether it's on a watchlist at all, so this is
+# checked and surfaced separately (see is_squawk_alarm / api_liveflights)
+# rather than folded into effective_alert_category.
+SQUAWK_ALARM_CODES = {"7500", "7600", "7700"}
+
+def is_squawk_alarm(squawk_value):
+    """True if squawk_value is one of the emergency codes above. Squawk
+    normally arrives from the live feed as a plain 4-digit string (e.g.
+    "4446"), with "0" as the fallback when it's not known yet - both
+    compared directly and, defensively, via int() in case it's ever handed
+    an unpadded or numeric value instead (a bare int, or "0007500")."""
+    if not squawk_value:
+        return False
+    raw = str(squawk_value).strip()
+    if raw in SQUAWK_ALARM_CODES:
+        return True
+    try:
+        return str(int(raw)) in SQUAWK_ALARM_CODES
+    except (TypeError, ValueError):
+        return False
+
 # Simple username:password gate for the /admin page. One line,
 # "username:passwd", in the modes_logger root. Read fresh on every login
 # attempt (never cached), so editing this file takes effect immediately.
@@ -135,7 +159,7 @@ DBAUTH_PATH = os.path.join(BASE_DIR, "dbauth.txt")
 # dbauth.txt, so a change takes effect immediately.
 ADMIN_SETTINGS_PATH = os.path.join(BASE_DIR, "admin_settings.json")
 
-LIVE_PAGE_REFRESH_SECONDS = 10   # how often liveflights.html polls /api/liveflights
+LIVE_PAGE_REFRESH_SECONDS = 5    # how often liveflights.html polls /api/liveflights
 
 # QNH altitude correction: raw ADS-B altitude is always pressure altitude
 # (referenced to 1013.25 hPa), so below the transition altitude it needs
@@ -1337,7 +1361,10 @@ def liveflights():
 def api_liveflights():
     """JSON snapshot of what's currently being received, for liveflights.html
     to poll. Registration/Type fall back to BaseStation.sqb when the live
-    feed's own reg/typ is blank for that aircraft, same as the results page."""
+    feed's own reg/typ is blank for that aircraft, same as the results page.
+    Each aircraft also carries "squawk_alarm" (see is_squawk_alarm) - kept
+    separate from "alert" since a squawk alarm can fire on any aircraft,
+    watchlisted or not."""
     conn_base = sqlite3.connect(SQB_DB_PATH)
     cur_base = conn_base.cursor()
     eastern_enabled = read_eastern_red_enabled()
@@ -1370,6 +1397,7 @@ def api_liveflights():
             "lat": ac["lat"],
             "lon": ac["lon"],
             "alert": effective_alert_category(icao24, alert["cmpg"], eastern_enabled) if alert else None,
+            "squawk_alarm": is_squawk_alarm(ac["squawk"]),
         })
 
     conn_base.close()

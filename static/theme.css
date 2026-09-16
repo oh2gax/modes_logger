@@ -27,6 +27,16 @@
        both themes. */
     --success-text: #1e7d34;
     --warning-text: #b3541e;
+    /* Squawk alarm (7500/7600/7700) cell - deliberately a much more
+       saturated, "stop sign" red than the soft --eastern-bg row tint above,
+       so it still pops on an already eastern-red row (a flagged Russian
+       aircraft squawking an emergency code, for instance). Applied only to
+       the Squawk cell itself, never the whole row. -dim is the blink
+       animation's other phase - a dark red rather than fading to nothing,
+       so the cell stays legible at every point in the cycle. */
+    --squawk-alarm-bg: #d90000;
+    --squawk-alarm-bg-dim: #7a0000;
+    --squawk-alarm-text: #ffffff;
 }
 
 [data-theme="dark"] {
@@ -48,6 +58,13 @@
     --icon-color: #eef1f4;
     --success-text: #5fbf7a;
     --warning-text: #e0954f;
+    /* Same "stop sign" red as light mode (see :root) - an alarm color
+       deliberately doesn't get muted for dark mode the way the other
+       row-background colors do, since it needs to keep reading as urgent
+       against --eastern-bg's dark maroon too. */
+    --squawk-alarm-bg: #e30000;
+    --squawk-alarm-bg-dim: #5c0000;
+    --squawk-alarm-text: #ffffff;
 }
 
 /* Simple, flat box (not a bright/filled circle) that blends with the page

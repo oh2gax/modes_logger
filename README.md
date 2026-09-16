@@ -47,6 +47,9 @@ At a glance, modes_logger currently gives you:
 - **"Show flagged eastern planes as red"** — an admin-page toggle that
   recolors any *already-flagged* aircraft red when its ICAO24 falls in
   Russia's Mode-S allocation block, regardless of its Mil/Gov/Civ color.
+- **A squawk alarm** on the Live Flights page — 7500/7600/7700 gets an
+  aircraft's Squawk cell a bold blinking red highlight, independent of
+  Mil/Gov/Civ/watchlist status entirely.
 - **Light/dark mode** on every page, remembered across visits.
 
 ## How it works
@@ -66,7 +69,7 @@ Radarcape receiver ──(JSON)──> JSON stream server ──(TCP :31009)─�
   fields) `hex` (ICAO24), `fli` (callsign), `lat`/`lon`/`alt`/`spd`/`trk`,
   `squ` (squawk), `reg` (registration), `typ` (ICAO type code), and `uti`
   (the receiver's own capture timestamp, unix epoch seconds).
-- **modes-logger.py** polls that port every `FETCH_INTERVAL` seconds (10s by
+- **modes-logger.py** polls that port every `FETCH_INTERVAL` seconds (5s by
   default), and for each aircraft in the snapshot:
   - tracks a "current flight" pointer per ICAO24 so repeated sightings update
     the same row instead of creating new ones;
@@ -480,9 +483,9 @@ Speed, Lat/Lon, Distance), independent of the history in `adsb_data.db` —
 it's simply whatever was in the most recent poll of the JSON feed, so an
 aircraft disappears from this page as soon as one poll cycle no longer
 reports it. It refreshes automatically every `LIVE_PAGE_REFRESH_SECONDS`
-via a small JavaScript poller (no full page reload), and uses the same
-sticky header, frozen Registration column, and alert-row highlighting as
-the Results page.
+(5s by default) via a small JavaScript poller (no full page reload), and
+uses the same sticky header, frozen Registration column, and alert-row
+highlighting as the Results page.
 
 Click the Registration, ICAO24, Altitude, Selected Alt, Vert Rate, or
 Distance column headers to sort by that column (click again to reverse
@@ -508,6 +511,27 @@ in the normal view. A small gap also opens up between the header and the
 first flight strip in this view, so a flagged row's color doesn't sit
 flush against the header and get mistaken for it at a glance. Unchecking
 the box instantly reverts the filter, the row size, and the gap together.
+
+### Squawk alarm
+
+Any aircraft squawking one of the universal ICAO emergency codes — 7500
+(hijack), 7600 (radio/communication failure), or 7700 (general emergency) —
+gets its Squawk cell highlighted with a strong, saturated red background,
+bold white text, and a slow blink (about once a second). This is completely
+independent of the Mil/Gov/Civ/watchlist coloring described above — any
+aircraft can trigger it, watchlisted or not — and it colors only the Squawk
+cell itself, never the whole row, so it stays clearly visible no matter
+what row color (or none) it happens to be sitting on. It's deliberately a
+much more intense red than the "Show flagged eastern planes as red" row
+highlight, specifically so it doesn't get lost if an eastern-flagged
+aircraft also has an active squawk alarm. If your browser or OS is set to
+reduce motion, the blink is skipped automatically and the highlight just
+stays solid instead.
+
+"Show only flagged" also takes a squawk alarm into account: an aircraft
+squawking one of these codes is kept visible while that filter is on even
+if it isn't on any watchlist at all, so an emergency squawk is never
+accidentally hidden by it.
 
 Altitude and Selected Alt are shown in standard aviation shorthand instead
 of raw feet: at or above a 5000ft transition altitude (`TRANSITION_ALTITUDE_FT`,
@@ -589,7 +613,7 @@ All tunable settings live as constants near the top of `modes-logger.py`:
 | `SQB_DB_PATH` | `<script dir>/BaseStation.sqb` | Shared aircraft registration/type database — same resolution as above |
 | `LEGACY_DB_PATH` | `<script dir>/BaseStation-legacy-2023.sqb` | Optional read-only legacy archive (see "Legacy archive" above) — same resolution as above; the Search page's checkbox only appears when this file exists |
 | `LEGACY_ARCHIVE_MIN_YEAR` / `LEGACY_ARCHIVE_MAX_YEAR` | `2007` / `2023` | Year range the legacy archive is assumed to cover — a search outside this range skips querying it entirely |
-| `FETCH_INTERVAL` | `10` (seconds) | How often to poll the JSON source |
+| `FETCH_INTERVAL` | `5` (seconds) | How often to poll the JSON source |
 | `MIN_UPDATE_MINUTES` | `2` | Debounce window per aircraft |
 | `FLIGHT_GAP_SECONDS` | `3600` | Gap after which a new sighting starts a new flight row |
 | `IDENTITY_FILL_WINDOW_SECONDS` | `600` | How long after true first contact a still-blank `FirstCallsign`/`FirstSquawk` can be backfilled |
@@ -599,9 +623,10 @@ All tunable settings live as constants near the top of `modes-logger.py`:
 | `ALERT_GOV_CSV` / `ALERT_MIL_CSV` | `plane-alert-gov.csv` / `plane-alert-mil.csv` in `ALERTDB_DIR` | Optional fallback watchlist files, loaded after the master CSV (any ICAO24 already loaded from it is skipped) |
 | `ALERT_USER_CSV` | `plane-alert-user.csv` in `ALERTDB_DIR` | Your own watchlist, managed from `/admin` |
 | `RUSSIA_ICAO24_MIN` / `RUSSIA_ICAO24_MAX` | `0x100000` / `0x1FFFFF` | Russia's allocated Mode-S address block, used by the "Show flagged eastern planes as red" toggle |
+| `SQUAWK_ALARM_CODES` | `{"7500", "7600", "7700"}` | Squawk values that trigger the Live Flights page's squawk alarm highlight |
 | `DBAUTH_PATH` | `<script dir>/dbauth.txt` | Admin page login credentials (one line, `username:passwd`) |
 | `ADMIN_SETTINGS_PATH` | `<script dir>/admin_settings.json` | Stores the "Show flagged eastern planes as red" toggle state; created automatically the first time it's changed |
-| `LIVE_PAGE_REFRESH_SECONDS` | `10` | How often `/liveflights` polls `/api/liveflights` for fresh data |
+| `LIVE_PAGE_REFRESH_SECONDS` | `5` | How often `/liveflights` polls `/api/liveflights` for fresh data |
 | `METAR_STATION_ICAO` | `EFHK` | Station whose METAR is polled for QNH altitude correction |
 | `QNH_FETCH_INTERVAL_SECONDS` | `600` (10 minutes) | How often the background poller refreshes QNH from NOAA's METAR feed |
 | `QNH_FETCH_TIMEOUT_SECONDS` | `10` | Timeout for each QNH fetch attempt |

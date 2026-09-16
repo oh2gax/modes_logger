@@ -140,6 +140,31 @@
         table.big-rows tbody tr:first-child td {
             border-top: 10px solid var(--bg);
         }
+        /* Squawk alarm (7500/7600/7700): cell-only, deliberately not a row
+           color - it's independent of Mil/Gov/Civ/eastern watchlist status
+           (see is_squawk_alarm server-side), so it has to stay visible and
+           distinct no matter what row color, if any, it's sitting on top
+           of. Blinks between --squawk-alarm-bg and the darker -bg-dim
+           (never fading to the row's own background) at a slow ~1s cycle,
+           well under the flash rate associated with photosensitive
+           triggers; prefers-reduced-motion turns the blink off entirely
+           and falls back to the plain static highlight. */
+        .squawk-alarm-cell {
+            background-color: var(--squawk-alarm-bg);
+            color: var(--squawk-alarm-text);
+            font-weight: bold;
+            animation: squawk-blink 1s steps(1, end) infinite;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .squawk-alarm-cell {
+                animation: none;
+            }
+        }
+        @keyframes squawk-blink {
+            50% {
+                background-color: var(--squawk-alarm-bg-dim);
+            }
+        }
     </style>
 </head>
 <body>
@@ -212,7 +237,11 @@
 
         function applyFlaggedFilter(data) {
             if (!flaggedOnly) return data;
-            return data.filter(ac => ac.alert === 'mil' || ac.alert === 'gov' || ac.alert === 'civ' || ac.alert === 'eastern');
+            // A squawk alarm always counts as "flagged" here too, even for
+            // an aircraft with no watchlist entry at all (ac.alert null) -
+            // otherwise it would be invisible while this filter is on,
+            // which defeats the point of the alarm.
+            return data.filter(ac => ac.alert === 'mil' || ac.alert === 'gov' || ac.alert === 'civ' || ac.alert === 'eastern' || ac.squawk_alarm);
         }
 
         function cell(value, className) {
@@ -335,7 +364,7 @@
                 tr.appendChild(cell(ac.icao24));
                 tr.appendChild(cell(ac.callsign));
                 tr.appendChild(cell(ac.type));
-                tr.appendChild(cell(ac.squawk));
+                tr.appendChild(cell(ac.squawk, ac.squawk_alarm ? 'squawk-alarm-cell' : null));
                 tr.appendChild(cell(formatAltitude(ac.altitude)));
                 tr.appendChild(cell(formatSelectedAltitude(ac.selected_altitude)));
                 tr.appendChild(cell(ac.vertical_rate));
