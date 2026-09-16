@@ -345,10 +345,16 @@ screen. The search form has five fields, all optional and combinable:
   currently on the official watchlist or your own watchlist (see below),
   combinable with any of the fields above.
 
-Leaving every field at its default (Registration search with an empty
-value) returns the entire flight history, oldest first. A **Clear** button
-next to Search resets every field back to this default state without
-running a search — handy for starting over between different lookups.
+At least one of Search value, Date, or Show only flagged has to be filled
+in before a search runs. Leaving all three at their defaults — even with
+Max last altitude set — is refused with an on-page message instead of
+running, the same way the bare year/month case above is: an unfiltered
+search would otherwise scan the entire flight history and, for every single
+matching row, run a separate lookup query against `BaseStation.sqb`, which
+on a real history is enough individual queries to bring the app down rather
+than just being slow. A **Clear** button next to Search resets every field
+back to this default (blocked) state without running a search — handy for
+starting over between different lookups.
 
 ### Results page (`/query`)
 

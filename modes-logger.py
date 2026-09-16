@@ -969,6 +969,7 @@ def query():
             "results.html", results=[], alert_lookup={},
             flagged_only=bool(flagged_only), date_too_broad=True,
             range_incomplete=False, range_invalid=False, range_too_broad=False,
+            no_filter_too_broad=False,
             search_field=search_field, search_value=search_value,
         )
 
@@ -978,6 +979,27 @@ def query():
             flagged_only=bool(flagged_only), date_too_broad=False,
             range_incomplete=range_incomplete, range_invalid=range_invalid,
             range_too_broad=range_too_broad,
+            no_filter_too_broad=False,
+            search_field=search_field, search_value=search_value,
+        )
+
+    if not search_value and not date and not flagged_only:
+        # Nothing at all to narrow the search by - the SQL itself
+        # ("WHERE 1=1", no clauses added) would scan the entire aircraft
+        # table, and every single matched row then triggers its own extra
+        # lookup query against BaseStation.sqb just below, one at a time.
+        # On a flight history of any real size that's not just a big page
+        # to render, it's tens or hundreds of thousands of individual SQL
+        # queries in a loop, which is what actually brought the app down
+        # rather than just being slow. Same refuse-before-touching-the-
+        # database approach as the bare year/month and overly-wide-range
+        # guards above; max_altitude alone doesn't count as narrow enough
+        # either, for the same reason it doesn't for those.
+        return render_template(
+            "results.html", results=[], alert_lookup={},
+            flagged_only=bool(flagged_only), date_too_broad=False,
+            range_incomplete=False, range_invalid=False, range_too_broad=False,
+            no_filter_too_broad=True,
             search_field=search_field, search_value=search_value,
         )
 
@@ -1069,6 +1091,7 @@ def query():
         "results.html", results=results, alert_lookup=alert_lookup,
         flagged_only=bool(flagged_only), date_too_broad=False,
         range_incomplete=False, range_invalid=False, range_too_broad=False,
+        no_filter_too_broad=False,
         search_field=search_field, search_value=search_value,
     )
 
