@@ -25,6 +25,26 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_NAME = os.path.join(BASE_DIR, "adsb_data.db")
 SQB_DB_PATH = os.path.join(BASE_DIR, "BaseStation.sqb")
 
+# Optional, entirely read-only historical archive from a previous logging
+# setup (standard Kinetic/BaseStation schema - separate Aircraft + Flights
+# tables, not modes_logger's own simplified format - see query_legacy_flights
+# below). The app never writes to it: query_legacy_flights only ever opens
+# it via a read-only sqlite3 URI, a hard guarantee on top of the code simply
+# never issuing a write statement against it. Entirely optional - if the
+# file isn't present, the Search page just doesn't offer the "Include
+# legacy archive" option, same as a missing alert-db CSV is just skipped.
+LEGACY_DB_PATH = os.path.join(BASE_DIR, "BaseStation-legacy-2023.sqb")
+
+# Coarse by-year bounds the archive actually covers (its real data runs
+# 2007-01-27 to 2023-07-17) - used only to skip opening the legacy database
+# at all when the requested year obviously falls outside it (e.g. a search
+# for 2026), before doing any work. Treating each boundary year as fully
+# in-range even though the real data starts/ends partway through it is
+# harmless - worst case a query for the first/last few months of either
+# year finds nothing, same as if the file weren't searched at all.
+LEGACY_ARCHIVE_MIN_YEAR = 2007
+LEGACY_ARCHIVE_MAX_YEAR = 2023
+
 FETCH_INTERVAL = 10          # seconds between polls
 MIN_UPDATE_MINUTES = 2       # debounce: ignore Last*-updates inside this window
 FLIGHT_GAP_SECONDS = 3600    # >1 hour means a new flight
@@ -870,7 +890,7 @@ app.secret_key = secrets.token_hex(32)
 
 @app.route("/")
 def home():
-    return render_template("index.html")
+    return render_template("index.html", legacy_db_available=os.path.exists(LEGACY_DB_PATH))
 
 # A "date" filter this broad - a bare year ("2026") or a bare month+year
 # ("09-2026") - matches almost every row of a large history on its own,
@@ -915,6 +935,168 @@ def parse_ddmmyyyy_bounds(date_str):
     end_epoch = int((day_start + timedelta(days=1)).timestamp()) - 1
     return start_epoch, end_epoch, day_start
 
+def legacy_date_bounds(date_value):
+    """Convert a Date field value already confirmed to be a bare year, a
+    month+year, or one specific dd-mm-yyyy day into an explicit [start, end)
+    ISO-datetime-string range for querying the legacy archive's StartTime
+    column - stored as 'yyyy-mm-dd HH:MM:SS[.fff]' text, unlike
+    modes_logger's own 'dd-mm-yyyy HH:MM'.
+
+    An explicit range comparison, rather than a 'LIKE prefix%' pattern, is
+    what lets SQLite actually use the FlightsStartTime index for a bound
+    (?) parameter - SQLite can't decide at prepare time whether a
+    parameterized LIKE pattern starts with a wildcard, so it falls back to
+    scanning every one of the Flights table's ~2.8 million rows instead
+    (confirmed with EXPLAIN QUERY PLAN against the real archive - a >7s
+    full scan for a single-aircraft, single-year search that found nothing,
+    versus ~1s or well under it once this became a plain >=/< range).
+
+    Returns (start_iso, end_iso, year), or None if date_value isn't one of
+    those three accepted forms (a Date/End Date range, for instance, never
+    reaches this)."""
+    if BARE_YEAR_RE.match(date_value):
+        year = int(date_value)
+        start = datetime(year, 1, 1)
+        end = datetime(year + 1, 1, 1)
+    elif BARE_MONTH_YEAR_RE.match(date_value):
+        mm, yyyy = date_value.split("-")
+        month, year = int(mm), int(yyyy)
+        start = datetime(year, month, 1)
+        end = datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)
+    elif DATE_DDMMYYYY_RE.match(date_value):
+        try:
+            start = datetime.strptime(date_value, "%d-%m-%Y")
+        except ValueError:
+            return None
+        year = start.year
+        end = start + timedelta(days=1)
+    else:
+        return None
+    return start.strftime("%Y-%m-%d %H:%M:%S"), end.strftime("%Y-%m-%d %H:%M:%S"), year
+
+def parse_legacy_datetime(value):
+    """Parse a legacy archive StartTime/EndTime value into a datetime, or
+    None if it's missing or the '0001-01-01 00:00:00' sentinel BaseStation
+    uses for an EndTime that was never recorded (a flight record that was
+    never properly closed out - not a real date). Only the fixed-width
+    'yyyy-mm-dd HH:MM:SS' prefix is parsed; any fractional seconds are
+    ignored, both because they're not meaningful here and to sidestep
+    version differences in how datetime.fromisoformat handles fractional-
+    second precision."""
+    if not value or value.startswith("0001-01-01"):
+        return None
+    try:
+        return datetime.strptime(value[:19], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+
+def query_legacy_flights(search_field, search_value, start_iso, end_iso, max_altitude, flagged_only):
+    """Query the optional read-only legacy archive (see LEGACY_DB_PATH) for
+    flights matching the same search_field/search_value/max_altitude/
+    flagged_only filters query() applies to adsb_data.db, restricted to the
+    [start_iso, end_iso) StartTime range (see legacy_date_bounds) that Date
+    already narrows it to - a single year, month, or day. Returns a list of
+    row tuples in exactly the shape query() builds its own results in, so
+    they can be appended straight into the same results list and rendered
+    by the same results.html template - or [] if the file isn't present.
+
+    Opened with SQLite's read-only URI mode as a hard guarantee this
+    connection can never write to the file, on top of the fact that no
+    write statement is ever issued against it anywhere in this function -
+    this archive is historical reference data only."""
+    if not os.path.exists(LEGACY_DB_PATH):
+        return []
+
+    conn = sqlite3.connect(f"file:{LEGACY_DB_PATH}?mode=ro", uri=True)
+    try:
+        cur = conn.cursor()
+
+        match_pattern = search_value.replace("*", "%")
+
+        if search_field == "registration":
+            match_col, aircraft_col = "a.Registration", "Registration"
+        elif search_field == "callsign":
+            match_col, aircraft_col = "f.Callsign", None
+        else:
+            match_col, aircraft_col = "a.ModeS", "ModeS"  # default: ICAO24
+
+        if aircraft_col:
+            # Cheap existence check against the small (36k-row, indexed)
+            # Aircraft table before ever touching the much larger Flights
+            # table - a typo'd or never-logged ICAO24/registration then
+            # costs one fast indexed lookup instead of a bounded-but-still-
+            # real range scan over the requested year's flights. Callsign
+            # has no equivalent here since it only lives on Flights.
+            cur.execute(f"SELECT 1 FROM Aircraft WHERE {aircraft_col} LIKE ? LIMIT 1", (match_pattern,))
+            if cur.fetchone() is None:
+                return []
+
+        sql = (
+            "SELECT a.ModeS, a.Registration, a.ICAOTypeCode, a.Type, "
+            "       f.Callsign, f.FirstSquawk, f.LastSquawk, "
+            "       f.FirstLat, f.FirstLon, f.FirstAltitude, f.FirstTrack, f.FirstGroundSpeed, "
+            "       f.LastLat, f.LastLon, f.LastAltitude, f.LastTrack, f.LastGroundSpeed, "
+            "       f.StartTime, f.EndTime "
+            "FROM Flights f JOIN Aircraft a ON a.AircraftID = f.AircraftID "
+            "WHERE f.StartTime >= ? AND f.StartTime < ? "
+            f"AND {match_col} LIKE ?"
+        )
+        params = [start_iso, end_iso, match_pattern]
+
+        if max_altitude:
+            sql += " AND f.LastAltitude < ?"
+            params.append(max_altitude)
+
+        if flagged_only:
+            # Same pattern as the main query's flagged_only handling -
+            # ALERT_DB lives in memory, not in this file, so filter by the
+            # matching ICAO24s directly.
+            alert_icaos = list(ALERT_DB.keys()) or ["__NONE__"]
+            sql += f" AND a.ModeS IN ({','.join('?' for _ in alert_icaos)})"
+            params.extend(alert_icaos)
+
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+
+        def fmt_squawk(v):
+            # Legacy squawk is a plain integer, not zero-padded text like
+            # the live feed provides - pad to the conventional 4 digits.
+            return f"{v:04d}" if v is not None else ""
+
+        results = []
+        for (icao, registration, icao_type, type_name, callsign, first_squawk, last_squawk,
+             first_lat, first_lon, first_altitude, first_track, first_speed,
+             last_lat, last_lon, last_altitude, last_track, last_speed,
+             start_time, end_time) in rows:
+            first_dt = parse_legacy_datetime(start_time)
+            if first_dt is None:
+                # No usable start time at all - shouldn't happen in
+                # practice (StartTime is effectively always populated), but
+                # skip rather than show a row with no meaningful order.
+                continue
+            last_dt = parse_legacy_datetime(end_time) or first_dt
+
+            callsign = (callsign or "").strip()
+            registration = registration or "Not Found"
+            # ICAOTypeCode is only sparsely populated in this particular
+            # archive - a lot of entries carry the type inside the
+            # Registration text instead (e.g. "Z-WPE(B762)") - so fall back
+            # to the free-text Type column before giving up, same
+            # "Not Found" convention the main query uses.
+            ac_type = icao_type or type_name or "Not Found"
+
+            results.append((
+                icao, registration, ac_type,
+                callsign, fmt_squawk(first_squawk), first_lat, first_lon, first_altitude, first_track, first_speed,
+                first_dt.strftime(TS_FMT),
+                callsign, fmt_squawk(last_squawk), last_lat, last_lon, last_altitude, last_track, last_speed,
+                last_dt.strftime(TS_FMT),
+                int(first_dt.timestamp()), int(last_dt.timestamp()),
+            ))
+        return results
+    finally:
+        conn.close()
+
 @app.route("/query", methods=["GET"])
 def query():
     # Registration matches the form's own default "Search by" selection -
@@ -927,6 +1109,7 @@ def query():
     end_date = request.args.get("end_date", "").strip()
     max_altitude = request.args.get("max_altitude", "").strip()
     flagged_only = request.args.get("flagged_only", "").strip()
+    include_legacy = request.args.get("include_legacy", "").strip()
 
     # End Date range search - End Date alone switches the query into range
     # mode, with the existing Date field doing double duty as the range's
@@ -1002,6 +1185,33 @@ def query():
             no_filter_too_broad=True,
             search_field=search_field, search_value=search_value,
         )
+
+    # Legacy archive (see LEGACY_DB_PATH) only ever gets queried when all of
+    # the following hold - deliberately narrow, since it's an 800MB file
+    # with millions of rows:
+    #   - the checkbox is actually ticked;
+    #   - an ICAO24/Registration/Callsign value is given (same reasoning as
+    #     the no-filter guard above, just scoped to this one extra source -
+    #     even a single year of this archive can be hundreds of thousands
+    #     of flights, so "browse a whole year" isn't allowed here even
+    #     though it's tolerated - with a value - on the main database);
+    #   - Date is one specific year, month, or day (not empty, and not a
+    #     Date/End Date range - a range could span many years, exactly the
+    #     unbounded case this is meant to avoid).
+    # When any of those doesn't hold, legacy_prefix just stays None and the
+    # rest of this request behaves exactly as if the box were unticked -
+    # this is a quiet skip, not an error, so there's nothing to flash or
+    # show on the results page about it.
+    legacy_start_iso = legacy_end_iso = None
+    if include_legacy and search_value and date and not range_active:
+        parsed = legacy_date_bounds(date)
+        if parsed:
+            start_iso, end_iso, legacy_year = parsed
+            if LEGACY_ARCHIVE_MIN_YEAR <= legacy_year <= LEGACY_ARCHIVE_MAX_YEAR:
+                legacy_start_iso, legacy_end_iso = start_iso, end_iso
+            # else: requested year is entirely outside what the archive
+            # covers (e.g. 2026) - skip opening it at all rather than
+            # running a query guaranteed to return nothing.
 
     conn_main = sqlite3.connect(DB_NAME)
     cur_main = conn_main.cursor()
@@ -1087,12 +1297,31 @@ def query():
 
     conn_main.close()
     conn_base.close()
+
+    if legacy_start_iso:
+        legacy_results = query_legacy_flights(
+            search_field, search_value, legacy_start_iso, legacy_end_iso, max_altitude, flagged_only
+        )
+        for icao, *_rest in legacy_results:
+            alert = ALERT_DB.get(icao)
+            if alert:
+                alert_lookup.setdefault(
+                    icao, effective_alert_category(icao, alert["cmpg"], eastern_enabled)
+                )
+        results.extend(legacy_results)
+        # Merge sort by LastEpoch (index 20), same "oldest first" order the
+        # main query's own SQL already produced on its own - legacy rows
+        # weren't necessarily fetched in that order, so the combined list
+        # needs its own explicit sort rather than a simple concatenation.
+        results.sort(key=lambda r: r[20])
+
     return render_template(
         "results.html", results=results, alert_lookup=alert_lookup,
         flagged_only=bool(flagged_only), date_too_broad=False,
         range_incomplete=False, range_invalid=False, range_too_broad=False,
         no_filter_too_broad=False,
         search_field=search_field, search_value=search_value,
+        include_legacy=bool(include_legacy),
     )
 
 @app.route("/liveflights")

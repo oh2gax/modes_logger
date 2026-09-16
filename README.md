@@ -40,6 +40,10 @@ At a glance, modes_logger currently gives you:
   already know a plane's details before it's ever come through the live
   feed. Every change is confirmed before it's made, since it edits a shared
   database other ADS-B tools may also read.
+- **An optional read-only legacy archive** — drop in an older
+  BaseStation-format database covering years before `adsb_data.db` started,
+  and a "Include legacy archive" checkbox appears on the Search page to pull
+  matching historical flights straight into your results.
 - **"Show flagged eastern planes as red"** — an admin-page toggle that
   recolors any *already-flagged* aircraft red when its ICAO24 falls in
   Russia's Mode-S allocation block, regardless of its Mil/Gov/Civ color.
@@ -249,6 +253,55 @@ lists — light blue/light green/light amber by CMPG — and are included in
 "Show only flagged" on both the Results and Live Flights pages alongside
 the official watchlist matches.
 
+## Legacy archive (optional)
+
+If you've been logging for a long time and have an older BaseStation-format
+database from a previous system, drop it in as `BaseStation-legacy-2023.sqb`
+next to `modes-logger.py` and the Search page gains an **"Include legacy
+archive (2007–2023)"** checkbox. It's entirely optional — without the file
+present, the checkbox simply doesn't appear, and everything else behaves
+exactly as it always has.
+
+This is deliberately separate from `adsb_data.db`/`BaseStation.sqb`: it's
+treated as a big, read-only reference file rather than something to migrate
+data into or keep updated. The app never writes to it — the connection is
+opened in SQLite's read-only URI mode as a hard guarantee on top of the fact
+that no write statement is ever issued against it anywhere in the code — and
+it plays no part in the live poller, registration auto-updates, or anything
+else that touches the current data.
+
+Because an archive like this can easily hold a few million historical
+flights, it's only ever queried narrowly, never scanned in full:
+
+- The checkbox has to be ticked.
+- An ICAO24, Registration, or Callsign value has to be given in Search
+  value — the same requirement the main "please narrow your search" guard
+  already enforces, just extended to gate the archive too.
+- Date has to be one specific year, month, or day (`2013`, `06-2013`, or
+  `15-06-2013`) — not left blank, and not combined with an End Date range.
+  This matches how the archive tends to actually get used: "let's check that
+  plane's movements for year 2013," not an open-ended trawl.
+- The requested year has to fall inside the archive's own covered range
+  (`LEGACY_ARCHIVE_MIN_YEAR`–`LEGACY_ARCHIVE_MAX_YEAR` below) — a search for,
+  say, 2026 skips the archive entirely rather than running a query that
+  could only come back empty.
+
+If any of these aren't met, the archive is quietly left out of the search
+rather than showing an error — the main database is still searched
+normally. When the archive is included, matching flights are merged
+straight into the same results table as the current data and re-sorted
+together by last-seen time, with no separate section or visual marker,
+since having searched a specific year already tells you it's a legacy
+result. The underlying file is a standard Kinetic/BaseStation-format
+database (the same family `BaseStation.sqb` belongs to, just its own
+independent `Aircraft`/`Flights` schema rather than this app's), so if
+you've used one before with another ADS-B tool, the data should already
+look familiar.
+
+Since this file is expected to be large and is never meant to be shared,
+it's excluded from the repo via `.gitignore`'s existing `*.sqb` wildcard —
+no extra setup needed there.
+
 ## Requirements
 
 - Python 3.8+
@@ -297,7 +350,9 @@ modernized look — rounded input/select boxes, a label above each field, and
 each box sized to what it actually holds (e.g. a narrow Max last altitude
 box, the ICAO24/Registration/Callsign dropdown sitting beside its value
 box) — kept deliberately compact so it still fits comfortably on a phone
-screen. The search form has five fields, all optional and combinable:
+screen. The search form has five fields, all optional and combinable, plus a
+sixth that only appears when a legacy archive file is present (see "Legacy
+archive" above):
 
 - **Search by** — a dropdown choosing what "Search value" matches against:
   `Registration` (the default), `ICAO24`, or `Callsign`. All three accept
@@ -344,6 +399,11 @@ screen. The search form has five fields, all optional and combinable:
 - **Show only flagged** — a checkbox that restricts results to ICAO24s
   currently on the official watchlist or your own watchlist (see below),
   combinable with any of the fields above.
+- **Include legacy archive (2007–2023)** — only shown when a legacy archive
+  file is present (see "Legacy archive" above). Pulls matching historical
+  flights from that archive into the same results, but only when Search
+  value and a single-year/month/day Date are also given — see "Legacy
+  archive" above for exactly when it does and doesn't kick in.
 
 At least one of Search value, Date, or Show only flagged has to be filled
 in before a search runs. Leaving all three at their defaults — even with
@@ -367,7 +427,11 @@ at query time (shown as "Not Found" when that ICAO24 isn't in there yet).
 Each row shows the full First/Last pair for callsign, squawk, position,
 altitude, track, speed, and timestamp (all times UTC — noted under the
 page title) — so you can see both when a flight was first picked up and
-its most recent known state in one place. A row is highlighted light blue,
+its most recent known state in one place. First/Last Track and First/Last
+Speed are always rounded to the nearest whole number for display (the
+underlying value is unaffected) — most noticeable on flights sourced from
+the legacy archive, whose Track/Speed values were originally stored with
+more decimal precision than the live feed's. A row is highlighted light blue,
 light green, or light amber depending on that ICAO24's Military/Government/
 Civil classification (see below), whether it comes from the official
 watchlist or your own; a red background instead means it's flagged and
@@ -517,6 +581,8 @@ All tunable settings live as constants near the top of `modes-logger.py`:
 | `ADSB_JSON_HOST` / `ADSB_JSON_PORT` | `127.0.0.1` / `31009` | Where to read the live aircraft JSON snapshot from |
 | `DB_NAME` | `<script dir>/adsb_data.db` | Flight history database — always resolved next to `modes-logger.py`, not the working directory, so it doesn't matter where you launch it from |
 | `SQB_DB_PATH` | `<script dir>/BaseStation.sqb` | Shared aircraft registration/type database — same resolution as above |
+| `LEGACY_DB_PATH` | `<script dir>/BaseStation-legacy-2023.sqb` | Optional read-only legacy archive (see "Legacy archive" above) — same resolution as above; the Search page's checkbox only appears when this file exists |
+| `LEGACY_ARCHIVE_MIN_YEAR` / `LEGACY_ARCHIVE_MAX_YEAR` | `2007` / `2023` | Year range the legacy archive is assumed to cover — a search outside this range skips querying it entirely |
 | `FETCH_INTERVAL` | `10` (seconds) | How often to poll the JSON source |
 | `MIN_UPDATE_MINUTES` | `2` | Debounce window per aircraft |
 | `FLIGHT_GAP_SECONDS` | `3600` | Gap after which a new sighting starts a new flight row |
@@ -560,6 +626,7 @@ This repo intentionally contains only what modes_logger itself needs to run:
 - `dbauth.txt` — admin page login credentials (not committed — see `.gitignore`; you create this yourself, see Your own watchlist above)
 - `requirements.txt` — the one dependency (Flask)
 - `adsb_data.db`, `BaseStation.sqb`, `admin_settings.json` — local data files, created/updated at runtime (not meant to be committed — see `.gitignore`)
+- `BaseStation-legacy-2023.sqb` — optional, read-only legacy archive (see "Legacy archive" above); not committed, same `*.sqb` `.gitignore` rule as `BaseStation.sqb`
 
 The JSON relay that feeds port 31009 and any registration-lookup helper
 tools are separate, optional projects and intentionally don't live in this

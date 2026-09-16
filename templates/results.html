@@ -170,16 +170,16 @@
                 <td>{{ row[5] if row[5] is not none else '' }}</td>   <!-- First Lat -->
                 <td>{{ row[6] if row[6] is not none else '' }}</td>   <!-- First Lon -->
                 <td>{{ row[7] if row[7] is not none else '' }}</td>   <!-- First Altitude -->
-                <td>{{ row[8] if row[8] is not none else '' }}</td>   <!-- First Track -->
-                <td>{{ row[9] if row[9] is not none else '' }}</td>   <!-- First Speed -->
+                <td>{{ row[8]|round|int if row[8] is not none else '' }}</td>   <!-- First Track -->
+                <td>{{ row[9]|round|int if row[9] is not none else '' }}</td>   <!-- First Speed -->
                 <td>{{ row[10] }}</td>  <!-- First DateTime -->
                 <td>{{ row[11] }}</td>  <!-- Last Callsign -->
                 <td>{{ row[12] }}</td>  <!-- Last Squawk -->
                 <td>{{ row[13] if row[13] is not none else '' }}</td>  <!-- Last Lat -->
                 <td>{{ row[14] if row[14] is not none else '' }}</td>  <!-- Last Lon -->
                 <td>{{ row[15] if row[15] is not none else '' }}</td>  <!-- Last Altitude -->
-                <td>{{ row[16] if row[16] is not none else '' }}</td>  <!-- Last Track -->
-                <td>{{ row[17] if row[17] is not none else '' }}</td>  <!-- Last Speed -->
+                <td>{{ row[16]|round|int if row[16] is not none else '' }}</td>  <!-- Last Track -->
+                <td>{{ row[17]|round|int if row[17] is not none else '' }}</td>  <!-- Last Speed -->
                 <td>{{ row[18] }}</td>  <!-- Last DateTime -->
             </tr>
             {% endfor %}

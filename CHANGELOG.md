@@ -4,6 +4,14 @@ All notable changes to this project are documented here, grouped by date
 (newest first). Multiple changes made on the same day are listed together
 under that day's heading.
 
+## 2026-09-16
+
+### Added
+- Search page: an optional read-only historical archive. Dropping a `BaseStation-legacy-2023.sqb` file (a standard Kinetic/BaseStation-format database — not this project's own format) next to `modes-logger.py` unlocks a new **"Include legacy archive (2007–2023)"** checkbox. Checking it only actually queries the archive when an ICAO24, Registration, or Callsign value is also given and Date is set to one specific year, month, or day (never left blank, never combined with End Date) — a deliberate, narrow lookup by design, not a scan of the archive's ~2.8 million historical flights. Matching legacy flights are merged straight into the same results table and sorted together with current data, with no visual distinction between the two, since typing a specific year already tells you it's a legacy search. The archive connection is opened read-only as a hard guarantee nothing in this app can ever write to it, and the feature is entirely optional — without the file present, the checkbox simply doesn't appear, and the search runs exactly as it always has.
+
+### Fixed
+- Results page: First Track, First Speed, Last Track, and Last Speed no longer show raw floating-point noise (e.g. `226.8000030517578`) — all four now round to the nearest whole number for display (e.g. `227`). Most noticeable on flights sourced from the legacy archive above, whose Track/Speed values were stored with more decimal precision than the live feed's.
+
 ## 2026-09-15
 
 ### Added
