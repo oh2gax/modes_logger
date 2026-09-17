@@ -4,6 +4,11 @@ All notable changes to this project are documented here, grouped by date
 (newest first). Multiple changes made on the same day are listed together
 under that day's heading.
 
+## 2026-09-17
+
+### Added
+- Live Flights page: a squawk-alarm aircraft (see the squawk alarm feature below) now always sorts to the top of the table, regardless of whatever column and direction you've currently got the rest of the table sorted by, and regardless of whether "Show only flagged" is on. When more than one aircraft has an active alarm, they're ordered among themselves by altitude (lowest first, an unknown altitude last within that group but still above every ordinary row) — fixed, not affected by clicking the Altitude header or reversing its direction. The point is simply that an emergency squawk should never end up scrolled out of view below the fold, especially on a phone screen with a lot of traffic on it.
+
 ## 2026-09-16
 
 ### Added

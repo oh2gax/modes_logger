@@ -49,7 +49,8 @@ At a glance, modes_logger currently gives you:
   Russia's Mode-S allocation block, regardless of its Mil/Gov/Civ color.
 - **A squawk alarm** on the Live Flights page — 7500/7600/7700 gets an
   aircraft's Squawk cell a bold blinking red highlight, independent of
-  Mil/Gov/Civ/watchlist status entirely.
+  Mil/Gov/Civ/watchlist status entirely, and that aircraft's row always
+  sorts to the top of the table so it can't scroll out of view.
 - **Light/dark mode** on every page, remembered across visits.
 
 ## How it works
@@ -532,6 +533,18 @@ stays solid instead.
 squawking one of these codes is kept visible while that filter is on even
 if it isn't on any watchlist at all, so an emergency squawk is never
 accidentally hidden by it.
+
+A squawk-alarm aircraft is also always sorted to the very top of the
+table, above every other row, regardless of which column (and direction)
+you've currently got the rest of the table sorted by, and whether "Show
+only flagged" is on or off — the point being that with a lot of traffic on
+screen, especially on a phone, an emergency squawk could otherwise end up
+scrolled below the fold where it's easy to miss entirely. If more than one
+aircraft has an active alarm at once, they're ordered among themselves by
+altitude, lowest first (an unknown altitude sorts last within that group,
+but still above every ordinary row) — this part is fixed and doesn't
+change if you click the Altitude header or reverse its direction; only the
+non-alarm rows below respond to that.
 
 Altitude and Selected Alt are shown in standard aviation shorthand instead
 of raw feet: at or above a 5000ft transition altitude (`TRANSITION_ALTITUDE_FT`,

@@ -337,6 +337,25 @@
             return withValues.concat(withBlanks);
         }
 
+        // Squawk-alarm aircraft (see squawk-alarm-cell) always render first,
+        // regardless of the column/direction currently selected for
+        // everything else - on a small screen, a handful of extra rows can
+        // easily push an emergency squawk below the fold, and that's exactly
+        // the case this exists to prevent. Within that pinned group the
+        // order is always altitude ascending (lowest first, unknown
+        // altitude last within the group but still above every non-alarm
+        // row) - fixed, not affected by clicking the Altitude header or any
+        // other column, same reasoning as why it's pinned at all: it
+        // shouldn't depend on what the rest of the table happens to be
+        // sorted by right now. Everything else keeps sorting exactly as
+        // before via sortData().
+        function sortForDisplay(data) {
+            const alarmRows = data.filter(ac => ac.squawk_alarm);
+            const restRows = data.filter(ac => !ac.squawk_alarm);
+            alarmRows.sort((a, b) => compareValues(a, b, 'altitude'));
+            return alarmRows.concat(sortData(restRows));
+        }
+
         function updateHeaderIndicators() {
             document.querySelectorAll('th[data-sort]').forEach(th => {
                 const key = th.dataset.sort;
@@ -379,7 +398,7 @@
         let lastUpdatedUtc = null;
 
         function renderCurrent() {
-            renderRows(sortData(applyFlaggedFilter(currentData)));
+            renderRows(sortForDisplay(applyFlaggedFilter(currentData)));
         }
 
         function updateStatus() {
