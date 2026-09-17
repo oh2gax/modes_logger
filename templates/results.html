@@ -112,6 +112,15 @@
         th[data-sort]:hover {
             text-decoration: underline;
         }
+        /* First/Last Squawk cell for a historical 7500/7600/7700 case - same
+           red used for the Live Flights page's real-time alarm cell, but
+           static (no blink/animation), since this is historical data, not
+           something happening right now. */
+        .squawk-alarm-cell {
+            background-color: var(--squawk-alarm-bg);
+            color: var(--squawk-alarm-text);
+            font-weight: bold;
+        }
         /* Second nav button (Live) sits to the right of the first (Search),
            both to the right of the theme toggle - see .nav-button in
            theme.css for the shared base styling. */
@@ -166,7 +175,7 @@
                 <td>{{ row[0] }}</td>   <!-- ICAO24 -->
                 <td>{{ row[2] }}</td>   <!-- Aircraft Type -->
                 <td>{{ row[3] }}</td>   <!-- First Callsign -->
-                <td>{{ row[4] }}</td>   <!-- First Squawk -->
+                <td class="{{ 'squawk-alarm-cell' if is_squawk_alarm(row[4]) else '' }}">{{ row[4] }}</td>   <!-- First Squawk -->
                 <td>{{ row[5] if row[5] is not none else '' }}</td>   <!-- First Lat -->
                 <td>{{ row[6] if row[6] is not none else '' }}</td>   <!-- First Lon -->
                 <td>{{ row[7] if row[7] is not none else '' }}</td>   <!-- First Altitude -->
@@ -174,7 +183,7 @@
                 <td>{{ row[9]|round|int if row[9] is not none else '' }}</td>   <!-- First Speed -->
                 <td>{{ row[10] }}</td>  <!-- First DateTime -->
                 <td>{{ row[11] }}</td>  <!-- Last Callsign -->
-                <td>{{ row[12] }}</td>  <!-- Last Squawk -->
+                <td class="{{ 'squawk-alarm-cell' if is_squawk_alarm(row[12]) else '' }}">{{ row[12] }}</td>  <!-- Last Squawk -->
                 <td>{{ row[13] if row[13] is not none else '' }}</td>  <!-- Last Lat -->
                 <td>{{ row[14] if row[14] is not none else '' }}</td>  <!-- Last Lon -->
                 <td>{{ row[15] if row[15] is not none else '' }}</td>  <!-- Last Altitude -->
@@ -189,13 +198,13 @@
     {% if date_required %}
     <p class="no-results">Please enter a Date before searching — a Date is required for every search, whether or not you also fill in Search value, Max last altitude, or Show only flagged.</p>
     {% elif date_too_broad %}
-    <p class="no-results">Please narrow your search — searching an entire year or month needs an ICAO24, Registration, or Callsign value too.</p>
+    <p class="no-results">Please narrow your search — searching an entire year or month needs an ICAO24, Registration, Callsign, or Squawk value too.</p>
     {% elif range_incomplete %}
     <p class="no-results">Please also enter a Date (dd-mm-yyyy) to pair with End Date — it becomes the start of the range.</p>
     {% elif range_invalid %}
     <p class="no-results">Please enter a valid Date and End Date (dd-mm-yyyy each), with Date being one specific day — not just a month or year — on or before End Date.</p>
     {% elif range_too_broad %}
-    <p class="no-results">Please narrow your search — a date range longer than 7 days needs an ICAO24, Registration, or Callsign value too.</p>
+    <p class="no-results">Please narrow your search — a date range longer than 7 days needs an ICAO24, Registration, Callsign, or Squawk value too.</p>
     {% elif flagged_only and not results %}
     <p class="no-results">No flagged planes found</p>
     {% elif not flagged_only and not results and search_field == 'registration' and search_value %}

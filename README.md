@@ -16,9 +16,9 @@ At a glance, modes_logger currently gives you:
 
 - **History logging** — first/last-seen tracking per flight, not a firehose
   of every position update (see "How it works" below for why).
-- **A search page** (`/`) to look up past flights by ICAO24, registration, or
-  callsign (wildcards supported), by exact or partial date, and/or by a
-  maximum last-seen altitude.
+- **A search page** (`/`) to look up past flights by ICAO24, registration,
+  callsign, or squawk (wildcards supported), by exact or partial date,
+  and/or by a maximum last-seen altitude.
 - **A live view** (`/liveflights`) of everything currently being received,
   auto-refreshing, with sortable columns, aviation-style altitude formatting
   (flight levels, QNH altitudes), and QNH-corrected altitudes below the
@@ -50,7 +50,12 @@ At a glance, modes_logger currently gives you:
 - **A squawk alarm** on the Live Flights page — 7500/7600/7700 gets an
   aircraft's Squawk cell a bold blinking red highlight, independent of
   Mil/Gov/Civ/watchlist status entirely, and that aircraft's row always
-  sorts to the top of the table so it can't scroll out of view.
+  sorts to the top of the table so it can't scroll out of view. The same
+  three codes get a static (non-blinking) version of that highlight on the
+  Results page's First/Last Squawk cells too, so a past 7500/7600/7700 case
+  stands out at a glance in search history — and Squawk is now also its own
+  "Search by" option, for looking up any specific squawk value, not just
+  these three.
 - **Light/dark mode** on every page, remembered across visits.
 
 ## How it works
@@ -278,9 +283,9 @@ Because an archive like this can easily hold a few million historical
 flights, it's only ever queried narrowly, never scanned in full:
 
 - The checkbox has to be ticked.
-- An ICAO24, Registration, or Callsign value has to be given in Search
-  value — the same requirement the main "please narrow your search" guard
-  already enforces, just extended to gate the archive too.
+- An ICAO24, Registration, Callsign, or Squawk value has to be given in
+  Search value — the same requirement the main "please narrow your search"
+  guard already enforces, just extended to gate the archive too.
 - Date has to be one specific year, month, or day (`2013`, `06-2013`, or
   `15-06-2013`) — not left blank, and not combined with an End Date range.
   This matches how the archive tends to actually get used: "let's check that
@@ -314,6 +319,14 @@ found either way, including one that's never been seen again since 2025.
 If a matched flight is still missing its Registration or Aircraft Type in
 the archive's own data, the current `BaseStation.sqb` is checked for that
 too before falling back to "Not Found".
+
+A Squawk search against the archive matches its `Flights.FirstSquawk`/
+`LastSquawk` columns, which — unlike `adsb_data.db`'s own already-padded
+text values — are stored as plain integers (e.g. `500`, not `"0500"`), so
+each is zero-padded to the conventional 4 digits before comparison, the
+same way it's zero-padded for display. This keeps a search like `0500` or
+a `05*` wildcard working the same whether a result comes from the archive
+or from current data.
 
 Since this file is expected to be large and is never meant to be shared,
 it's excluded from the repo via `.gitignore`'s existing `*.sqb` wildcard —
@@ -372,18 +385,23 @@ and combinable), plus a sixth that only appears when a legacy archive file
 is present (see "Legacy archive" above):
 
 - **Search by** — a dropdown choosing what "Search value" matches against:
-  `Registration` (the default), `ICAO24`, or `Callsign`. All three accept
-  the `*` wildcard (translated to SQL's `%` under the hood), e.g. `OH-*` for
-  registration or `15*` for ICAO24. Registration matching looks the value
-  up in `BaseStation.sqb` first, then filters the flight history by the
-  ICAO24 hexes found there — since registration itself isn't stored in
-  `adsb_data.db`. Registration is the default because the app now resolves
-  it for almost all traffic automatically; if a registration search comes
-  back with no matches, the Results page suggests trying ICAO24 instead, in
-  case that aircraft has been logged but its registration hasn't been
-  resolved into `BaseStation.sqb` yet. Callsign matching checks both
-  `FirstCallsign` and `LastCallsign`, since a callsign occasionally isn't
-  decoded until partway through a flight.
+  `Registration` (the default), `ICAO24`, `Callsign`, or `Squawk`. All four
+  accept the `*` wildcard (translated to SQL's `%` under the hood), e.g.
+  `OH-*` for registration, `15*` for ICAO24, or `77*` for squawk.
+  Registration matching looks the value up in `BaseStation.sqb` first, then
+  filters the flight history by the ICAO24 hexes found there — since
+  registration itself isn't stored in `adsb_data.db`. Registration is the
+  default because the app now resolves it for almost all traffic
+  automatically; if a registration search comes back with no matches, the
+  Results page suggests trying ICAO24 instead, in case that aircraft has
+  been logged but its registration hasn't been resolved into
+  `BaseStation.sqb` yet. Callsign matching checks both `FirstCallsign` and
+  `LastCallsign`, since a callsign occasionally isn't decoded until partway
+  through a flight. Squawk matching likewise checks both `FirstSquawk` and
+  `LastSquawk`, so a plane that changed squawk mid-flight is found either
+  way — not just for the three emergency codes (see "Squawk alarm" below),
+  but for any squawk value, e.g. looking up everything that's ever used a
+  particular code.
 - **Date** — required for every search, matched as a substring against both
   `FirstDateTime` and `LastDateTime` (which are stored as `dd-mm-yyyy
   HH:MM`), so a full date like `12-09-2026` matches that exact day, while a
@@ -397,7 +415,7 @@ is present (see "Legacy archive" above):
   altitude, and Show only flagged can only narrow an already-dated search,
   they can't run on their own. A bare year (`2026`) or month+year
   (`09-2026`) is a further step narrower still: on its own — without an
-  ICAO24, Registration, or Callsign value to narrow it too — it's also
+  ICAO24, Registration, Callsign, or Squawk value to narrow it too — it's also
   rejected with its own on-page message, since it would otherwise scan and
   return a large fraction of the whole flight history at once.
 - **End Date** — filling this in switches the search into a real date range
@@ -411,9 +429,9 @@ is present (see "Legacy archive" above):
   before the range or ran past it still shows up if it was in the air at
   some point inside it. A range of up to 7 days can be searched on its own —
   e.g. with just "Show only flagged", to check the last few days for
-  anything flagged — but a longer range needs an ICAO24, Registration, or
-  Callsign value too, same reasoning as the bare year/month protection
-  above.
+  anything flagged — but a longer range needs an ICAO24, Registration,
+  Callsign, or Squawk value too, same reasoning as the bare year/month
+  protection above.
 - **Max last altitude** — filters to flights whose `LastAltitude` is
   strictly below the given value (in feet); leave it blank to not filter by
   altitude at all.
@@ -454,7 +472,12 @@ its most recent known state in one place. First/Last Track and First/Last
 Speed are always rounded to the nearest whole number for display (the
 underlying value is unaffected) — most noticeable on flights sourced from
 the legacy archive, whose Track/Speed values were originally stored with
-more decimal precision than the live feed's. A row is highlighted light blue,
+more decimal precision than the live feed's. A First or Last Squawk cell
+showing 7500, 7600, or 7700 gets the same strong red background used for
+the Live Flights page's squawk alarm (see "Squawk alarm" below), except
+static rather than blinking, since this is historical data rather than
+something happening right now — a quick way to spot a past emergency
+squawk while scanning search results. A row is highlighted light blue,
 light green, or light amber depending on that ICAO24's Military/Government/
 Civil classification (see below), whether it comes from the official
 watchlist or your own; a red background instead means it's flagged and

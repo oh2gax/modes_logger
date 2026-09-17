@@ -192,6 +192,7 @@
                     <option value="icao24">ICAO24</option>
                     <option value="registration" selected>Registration</option>
                     <option value="callsign">Callsign</option>
+                    <option value="squawk">Squawk</option>
                 </select>
 
                 <input type="text" id="search_value" name="search_value" placeholder="* wildcard allowed">
@@ -213,7 +214,7 @@
                 <input type="text" id="end_date" name="end_date">
                 <input type="date" id="end_date_picker" class="date-picker-icon" title="Pick an end date" aria-label="Pick an end date from a calendar">
             </div>
-            <div class="field-hint">Adding this searches a range: Date above becomes the start (must be one specific day, not just a month or year). Up to 7 days works on its own (e.g. with Show only flagged); a longer range needs an ICAO24, Registration, or Callsign too.</div>
+            <div class="field-hint">Adding this searches a range: Date above becomes the start (must be one specific day, not just a month or year). Up to 7 days works on its own (e.g. with Show only flagged); a longer range needs an ICAO24, Registration, Callsign, or Squawk value too.</div>
         </div>
 
         <div class="field-group">
@@ -236,7 +237,7 @@
                 <input type="checkbox" id="include_legacy" name="include_legacy" value="1">
                 Include legacy archive (2007–2023)
             </label>
-            <div class="field-hint">Needs an ICAO24, Registration, or Callsign value, and Date set to one specific year, month, or day (not combined with End Date) — otherwise the archive is quietly left out of the search.</div>
+            <div class="field-hint">Needs an ICAO24, Registration, Callsign, or Squawk value, and Date set to one specific year, month, or day (not combined with End Date) — otherwise the archive is quietly left out of the search.</div>
         </div>
         {% endif %}
 

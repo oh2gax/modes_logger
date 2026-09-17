@@ -912,6 +912,12 @@ app = Flask(__name__)
 # than adding yet another secret file to manage.
 app.secret_key = secrets.token_hex(32)
 
+# Exposed to Jinja so results.html can flag a historical First/Last Squawk
+# cell (7500/7600/7700) with the same static red highlight the Live Flights
+# page uses for its real-time alarm - one source of truth for the alarm
+# code set instead of duplicating it as a literal list in the template.
+app.jinja_env.globals["is_squawk_alarm"] = is_squawk_alarm
+
 @app.route("/")
 def home():
     return render_template("index.html", legacy_db_available=os.path.exists(LEGACY_DB_PATH))
@@ -1083,6 +1089,23 @@ def query_legacy_flights(search_field, search_value, start_iso, end_iso, max_alt
             existence_params = None
             match_clause = "f.Callsign LIKE ?"
             match_params = [match_pattern]
+        elif search_field == "squawk":
+            # Same as callsign - Squawk only lives on Flights, so no cheap
+            # Aircraft-table pre-check here either. Unlike adsb_data.db,
+            # this archive's FirstSquawk/LastSquawk are plain (unpadded)
+            # integers, so each is normalized to the same 4-digit text form
+            # fmt_squawk() below uses for display before the LIKE match -
+            # otherwise a search for "0500" or a "05*" wildcard would miss
+            # a value stored as the integer 500. NULL is excluded rather
+            # than left to print as "0000", so an unknown squawk (shown
+            # blank) can never spuriously match a search.
+            existence_sql = None
+            existence_params = None
+            match_clause = (
+                "((f.FirstSquawk IS NOT NULL AND printf('%04d', f.FirstSquawk) LIKE ?) "
+                "OR (f.LastSquawk IS NOT NULL AND printf('%04d', f.LastSquawk) LIKE ?))"
+            )
+            match_params = [match_pattern, match_pattern]
         else:
             existence_sql = "SELECT 1 FROM Aircraft WHERE ModeS LIKE ? LIMIT 1"
             existence_params = [match_pattern]
@@ -1336,6 +1359,14 @@ def query():
         params.extend(matched)
     elif search_value and search_field == "callsign":
         sql += " AND (FirstCallsign LIKE ? OR LastCallsign LIKE ?)"
+        v = search_value.replace("*", "%")
+        params.extend([v, v])
+    elif search_value and search_field == "squawk":
+        # FirstSquawk/LastSquawk are already stored as plain 4-digit text
+        # here (straight from the live feed), so a direct LIKE works with
+        # no zero-padding gymnastics - unlike the legacy archive's integer
+        # column, see query_legacy_flights below.
+        sql += " AND (FirstSquawk LIKE ? OR LastSquawk LIKE ?)"
         v = search_value.replace("*", "%")
         params.extend([v, v])
     elif search_value:
