@@ -302,6 +302,19 @@ independent `Aircraft`/`Flights` schema rather than this app's), so if
 you've used one before with another ADS-B tool, the data should already
 look familiar.
 
+A Registration search against the archive checks two sources together,
+since neither one alone is complete: the archive's own Registration field
+(often never filled in — it had to be entered by hand in the old system
+this file comes from) and, separately, the current `BaseStation.sqb` (kept
+up to date automatically by the live feed) resolved to an ICAO24 and
+matched that way instead. A plane the archive itself never had a
+registration for is still found as long as it's since been seen by the
+live feed; a plane the archive directly knows the registration for is
+found either way, including one that's never been seen again since 2025.
+If a matched flight is still missing its Registration or Aircraft Type in
+the archive's own data, the current `BaseStation.sqb` is checked for that
+too before falling back to "Not Found".
+
 Since this file is expected to be large and is never meant to be shared,
 it's excluded from the repo via `.gitignore`'s existing `*.sqb` wildcard —
 no extra setup needed there.
@@ -515,8 +528,8 @@ the box instantly reverts the filter, the row size, and the gap together.
 
 ### Squawk alarm
 
-Any aircraft squawking one of the universal ICAO emergency codes — 7500
-(hijack), 7600 (radio/communication failure), or 7700 (general emergency) —
+Any aircraft squawking one of the universal ICAO emergency codes — 7500,
+7600 (radio/communication failure), or 7700 (general emergency) —
 gets its Squawk cell highlighted with a strong, saturated red background,
 bold white text, and a slow blink (about once a second). This is completely
 independent of the Mil/Gov/Civ/watchlist coloring described above — any

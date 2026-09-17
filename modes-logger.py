@@ -1014,7 +1014,8 @@ def parse_legacy_datetime(value):
     except ValueError:
         return None
 
-def query_legacy_flights(search_field, search_value, start_iso, end_iso, max_altitude, flagged_only):
+def query_legacy_flights(search_field, search_value, start_iso, end_iso, max_altitude, flagged_only,
+                          registration_icaos=None, cur_base=None):
     """Query the optional read-only legacy archive (see LEGACY_DB_PATH) for
     flights matching the same search_field/search_value/max_altitude/
     flagged_only filters query() applies to adsb_data.db, restricted to the
@@ -1023,6 +1024,32 @@ def query_legacy_flights(search_field, search_value, start_iso, end_iso, max_alt
     row tuples in exactly the shape query() builds its own results in, so
     they can be appended straight into the same results list and rendered
     by the same results.html template - or [] if the file isn't present.
+
+    For search_field == "registration", registration_icaos should be the
+    ICAO24 hex list query() already resolved from the CURRENT, live-feed-
+    maintained BaseStation.sqb for this same search value (may be empty or
+    None). A registration match here is the UNION of two sources, since
+    neither one alone is complete: the legacy archive's own Registration
+    field (still checked directly - reliable for a plane that flew only in
+    this archive's own 2007-2023 era and was never seen again since 2025,
+    so it has no entry in current BaseStation.sqb at all to resolve from)
+    OR registration_icaos (recovers the reverse case - checked against the
+    real archive, ~45% of its aircraft have no Registration filled in at
+    all, having been entered by hand in the old system this file comes
+    from, yet are otherwise fully present in the archive under their
+    ModeS, which - unlike Registration - is essentially always populated
+    here as the archive's own join key between Aircraft and Flights).
+
+    cur_base, when given, is an already-open cursor on the CURRENT
+    BaseStation.sqb (query() keeps its own connection open across this call
+    specifically to pass it through here) - used to fill in a still-blank
+    Registration or ICAOTypeCode/Type for a matched row from the current,
+    better-maintained source before falling back to "Not Found", the same
+    way api_liveflights() backfills those for the live view. Otherwise a
+    row found only by its ICAO24 (via the fix above) would still display as
+    "Not Found" even though the registration used to find it is already
+    known - one lookup per row that needs it, same bounded-by-a-narrow-
+    search reasoning as query()'s own per-row BaseStation.sqb lookups.
 
     Opened with SQLite's read-only URI mode as a hard guarantee this
     connection can never write to the file, on top of the fact that no
@@ -1038,20 +1065,38 @@ def query_legacy_flights(search_field, search_value, start_iso, end_iso, max_alt
         match_pattern = search_value.replace("*", "%")
 
         if search_field == "registration":
-            match_col, aircraft_col = "a.Registration", "Registration"
+            # Union of both sources - see the docstring above.
+            or_clauses = ["Registration LIKE ?"]
+            or_params = [match_pattern]
+            if registration_icaos:
+                placeholders = ",".join("?" for _ in registration_icaos)
+                or_clauses.append(f"ModeS IN ({placeholders})")
+                or_params += list(registration_icaos)
+            existence_sql = f"SELECT 1 FROM Aircraft WHERE {' OR '.join(or_clauses)} LIMIT 1"
+            existence_params = or_params
+            match_clause = "(" + " OR ".join(f"a.{c}" for c in or_clauses) + ")"
+            match_params = list(or_params)
         elif search_field == "callsign":
-            match_col, aircraft_col = "f.Callsign", None
+            # Callsign only lives on Flights, not Aircraft, so there's no
+            # equivalent cheap existence pre-check available here.
+            existence_sql = None
+            existence_params = None
+            match_clause = "f.Callsign LIKE ?"
+            match_params = [match_pattern]
         else:
-            match_col, aircraft_col = "a.ModeS", "ModeS"  # default: ICAO24
+            existence_sql = "SELECT 1 FROM Aircraft WHERE ModeS LIKE ? LIMIT 1"
+            existence_params = [match_pattern]
+            match_clause = "a.ModeS LIKE ?"
+            match_params = [match_pattern]
 
-        if aircraft_col:
+        if existence_sql:
             # Cheap existence check against the small (36k-row, indexed)
             # Aircraft table before ever touching the much larger Flights
-            # table - a typo'd or never-logged ICAO24/registration then
-            # costs one fast indexed lookup instead of a bounded-but-still-
-            # real range scan over the requested year's flights. Callsign
-            # has no equivalent here since it only lives on Flights.
-            cur.execute(f"SELECT 1 FROM Aircraft WHERE {aircraft_col} LIKE ? LIMIT 1", (match_pattern,))
+            # table - a typo'd, never-logged, or unresolvable ICAO24/
+            # registration then costs one fast indexed lookup instead of a
+            # bounded-but-still-real range scan over the requested year's
+            # flights.
+            cur.execute(existence_sql, existence_params)
             if cur.fetchone() is None:
                 return []
 
@@ -1063,9 +1108,9 @@ def query_legacy_flights(search_field, search_value, start_iso, end_iso, max_alt
             "       f.StartTime, f.EndTime "
             "FROM Flights f JOIN Aircraft a ON a.AircraftID = f.AircraftID "
             "WHERE f.StartTime >= ? AND f.StartTime < ? "
-            f"AND {match_col} LIKE ?"
+            f"AND {match_clause}"
         )
-        params = [start_iso, end_iso, match_pattern]
+        params = [start_iso, end_iso] + match_params
 
         if max_altitude:
             sql += " AND f.LastAltitude < ?"
@@ -1101,12 +1146,25 @@ def query_legacy_flights(search_field, search_value, start_iso, end_iso, max_alt
             last_dt = parse_legacy_datetime(end_time) or first_dt
 
             callsign = (callsign or "").strip()
+            # Registration or type still blank in the legacy archive itself?
+            # Try the current, better-maintained BaseStation.sqb before
+            # giving up - see the cur_base note in this function's
+            # docstring. One lookup per row that actually needs it, not per
+            # row overall.
+            if cur_base is not None and (not registration or not (icao_type or type_name)):
+                cur_base.execute("SELECT Registration, ICAOTypeCode FROM Aircraft WHERE ModeS = ?", (icao,))
+                base_row = cur_base.fetchone()
+                if base_row:
+                    registration = registration or base_row[0]
+                    if not (icao_type or type_name):
+                        icao_type = base_row[1]
             registration = registration or "Not Found"
             # ICAOTypeCode is only sparsely populated in this particular
             # archive - a lot of entries carry the type inside the
             # Registration text instead (e.g. "Z-WPE(B762)") - so fall back
-            # to the free-text Type column before giving up, same
-            # "Not Found" convention the main query uses.
+            # to the free-text Type column (and, above, the current
+            # BaseStation.sqb) before giving up, same "Not Found" convention
+            # the main query uses.
             ac_type = icao_type or type_name or "Not Found"
 
             results.append((
@@ -1261,14 +1319,19 @@ def query():
     )
     params = []
 
+    registration_matched_icaos = None
     if search_value and search_field == "registration":
         # Registration lives in BaseStation.sqb, not in aircraft — look up
         # matching ICAO24 hexes there first, then filter the main query.
+        # This resolved list is also reused below for the legacy archive
+        # (see query_legacy_flights) - it's the authoritative Reg->ICAO24
+        # mapping for a registration search, no reason to look it up twice.
         cur_base.execute(
             "SELECT ModeS FROM Aircraft WHERE Registration LIKE ?",
             (search_value.replace("*", "%"),)
         )
-        matched = [r[0] for r in cur_base.fetchall()] or ["__NONE__"]
+        registration_matched_icaos = [r[0] for r in cur_base.fetchall()]
+        matched = registration_matched_icaos or ["__NONE__"]
         sql += f" AND ICAO24 IN ({','.join('?' for _ in matched)})"
         params.extend(matched)
     elif search_value and search_field == "callsign":
@@ -1325,11 +1388,14 @@ def query():
             alert_lookup[icao] = effective_alert_category(icao, alert["cmpg"], eastern_enabled)
 
     conn_main.close()
-    conn_base.close()
 
     if legacy_start_iso:
+        # conn_base (BaseStation.sqb) is deliberately still open here - see
+        # the cur_base note on query_legacy_flights - and only closed below,
+        # after this call, instead of alongside conn_main above.
         legacy_results = query_legacy_flights(
-            search_field, search_value, legacy_start_iso, legacy_end_iso, max_altitude, flagged_only
+            search_field, search_value, legacy_start_iso, legacy_end_iso, max_altitude, flagged_only,
+            registration_icaos=registration_matched_icaos, cur_base=cur_base,
         )
         for icao, *_rest in legacy_results:
             alert = ALERT_DB.get(icao)
@@ -1343,6 +1409,8 @@ def query():
         # weren't necessarily fetched in that order, so the combined list
         # needs its own explicit sort rather than a simple concatenation.
         results.sort(key=lambda r: r[20])
+
+    conn_base.close()
 
     return render_template(
         "results.html", results=results, alert_lookup=alert_lookup,
