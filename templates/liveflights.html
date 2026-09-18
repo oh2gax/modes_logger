@@ -81,8 +81,20 @@
         tr.eastern-alert {
             background-color: var(--eastern-bg);
         }
+        /* Live watch filter match (see .watch-filter-group below) -
+           overrides mil/gov/civ/eastern while a plane is in the watch
+           filter, so a watched plane always visibly stands out as "the one
+           you're watching right now" rather than blending into its own
+           normal color. */
+        tr.temp-watch {
+            background-color: var(--temp-watch-bg);
+        }
         .numbering {
             width: 50px;
+            cursor: pointer;
+        }
+        #pin-toggle:hover {
+            text-decoration: underline;
         }
         .sticky-col {
             position: sticky;
@@ -105,6 +117,9 @@
         tr.eastern-alert .sticky-col {
             background-color: var(--eastern-bg);
         }
+        tr.temp-watch .sticky-col {
+            background-color: var(--temp-watch-bg);
+        }
         th.sticky-col {
             z-index: 3;
             background-color: var(--header-bg);
@@ -122,6 +137,30 @@
         }
         .flagged-filter label {
             cursor: pointer;
+        }
+        .flagged-filter .watch-filter-group {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            margin-left: 18px;
+        }
+        .flagged-filter .watch-filter-group label {
+            cursor: default;
+        }
+        #watch-filter {
+            font-family: inherit;
+            font-size: 12px;
+            color: var(--text);
+            background-color: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 3px 7px;
+            width: 200px;
+            box-sizing: border-box;
+        }
+        #watch-filter:focus {
+            outline: none;
+            border-color: var(--header-bg);
         }
         /* "Flight strip" style: bigger, easier-to-scan rows for the small
            number of aircraft typically shown when "Show only flagged" is
@@ -175,12 +214,16 @@
     <p id="qnh-status"></p>
     <div class="flagged-filter">
         <label><input type="checkbox" id="flagged-only"> Show only flagged</label>
+        <span class="watch-filter-group">
+            <label for="watch-filter">Watch:</label>
+            <input type="text" id="watch-filter" placeholder="ICAO24, ICAO24, …" autocomplete="off">
+        </span>
     </div>
     <div class="table-wrapper">
     <table>
         <thead>
             <tr>
-                <th class="numbering">#</th>
+                <th class="numbering" id="pin-toggle" title="Pin flagged &amp; watched aircraft to top, sorted by altitude">#</th>
                 <th class="sticky-col" data-sort="registration">Registration</th>
                 <th data-sort="icao24">ICAO24</th>
                 <th>Callsign</th>
@@ -234,6 +277,27 @@
         let currentData = [];
         let currentQnh = { hpa: null, status: 'timeout', updated_utc: null };
         let flaggedOnly = false;
+        // Ad-hoc, client-side-only "live watch" list (see #watch-filter) -
+        // never written to ALERT_DB/the real watchlist and never persisted
+        // anywhere, so it's simply gone the moment the field is cleared or
+        // the page is reloaded, by design. Holds lowercased ICAO24s.
+        let tempWatchIcaos = new Set();
+        // "#" header toggle: pins flagged/watched aircraft to the top,
+        // sorted by altitude ascending, same idea as the always-on
+        // squawk-alarm pinning below but opt-in and one tier lower.
+        let pinFlaggedTop = false;
+
+        function isTempWatched(ac) {
+            return tempWatchIcaos.size > 0 && ac.icao24 && tempWatchIcaos.has(ac.icao24.toLowerCase());
+        }
+
+        // Everything that counts as "flagged" for both the "Show only
+        // flagged" filter and the "#"-toggled pin-to-top group: a real
+        // mil/gov/civ/eastern watchlist entry, or a plane currently in the
+        // live watch filter.
+        function isFlagged(ac) {
+            return ac.alert === 'mil' || ac.alert === 'gov' || ac.alert === 'civ' || ac.alert === 'eastern' || isTempWatched(ac);
+        }
 
         function applyFlaggedFilter(data) {
             if (!flaggedOnly) return data;
@@ -241,7 +305,7 @@
             // an aircraft with no watchlist entry at all (ac.alert null) -
             // otherwise it would be invisible while this filter is on,
             // which defeats the point of the alarm.
-            return data.filter(ac => ac.alert === 'mil' || ac.alert === 'gov' || ac.alert === 'civ' || ac.alert === 'eastern' || ac.squawk_alarm);
+            return data.filter(ac => isFlagged(ac) || ac.squawk_alarm);
         }
 
         function cell(value, className) {
@@ -351,8 +415,18 @@
         // before via sortData().
         function sortForDisplay(data) {
             const alarmRows = data.filter(ac => ac.squawk_alarm);
-            const restRows = data.filter(ac => !ac.squawk_alarm);
+            let restRows = data.filter(ac => !ac.squawk_alarm);
             alarmRows.sort((a, b) => compareValues(a, b, 'altitude'));
+            // Second pinned tier, opt-in via the "#" header click: flagged
+            // (mil/gov/civ/eastern) and/or live-watched aircraft, altitude
+            // ascending, sitting right under the squawk-alarm rows above
+            // and above everything else's normal column sort.
+            if (pinFlaggedTop) {
+                const pinnedRows = restRows.filter(isFlagged);
+                restRows = restRows.filter(ac => !isFlagged(ac));
+                pinnedRows.sort((a, b) => compareValues(a, b, 'altitude'));
+                return alarmRows.concat(pinnedRows, sortData(restRows));
+            }
             return alarmRows.concat(sortData(restRows));
         }
 
@@ -369,7 +443,9 @@
             tbody.innerHTML = '';
             aircraft.forEach((ac, i) => {
                 const tr = document.createElement('tr');
-                if (ac.alert === 'mil') {
+                if (isTempWatched(ac)) {
+                    tr.className = 'temp-watch';
+                } else if (ac.alert === 'mil') {
                     tr.className = 'mil-alert';
                 } else if (ac.alert === 'gov') {
                     tr.className = 'gov-alert';
@@ -468,6 +544,20 @@
             document.querySelector('table').classList.toggle('big-rows', flaggedOnly);
             renderCurrent();
             updateStatus();
+        });
+
+        document.getElementById('watch-filter').addEventListener('input', function () {
+            tempWatchIcaos = new Set(
+                this.value.split(/[\s,]+/).map(s => s.trim().toLowerCase()).filter(Boolean)
+            );
+            renderCurrent();
+            updateStatus();
+        });
+
+        document.getElementById('pin-toggle').addEventListener('click', function () {
+            pinFlaggedTop = !pinFlaggedTop;
+            this.textContent = pinFlaggedTop ? '# ▲' : '#';
+            renderCurrent();
         });
 
         updateHeaderIndicators();

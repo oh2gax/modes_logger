@@ -37,6 +37,13 @@
     --squawk-alarm-bg: #d90000;
     --squawk-alarm-bg-dim: #7a0000;
     --squawk-alarm-text: #ffffff;
+    /* Live Flights "watch filter" row color (see liveflights.html) - an
+       ad-hoc, client-side-only highlight for a plane typed into the watch
+       filter, never written to ALERT_DB. Deliberately a hue none of the
+       four watchlist colors above use, so a watched plane always stands
+       out, including when it's ALSO a real mil/gov/civ/eastern entry (this
+       color takes over from that one while the filter is active). */
+    --temp-watch-bg: #e6d6f7;
 }
 
 [data-theme="dark"] {
@@ -65,6 +72,7 @@
     --squawk-alarm-bg: #e30000;
     --squawk-alarm-bg-dim: #5c0000;
     --squawk-alarm-text: #ffffff;
+    --temp-watch-bg: #3d2a52;
 }
 
 /* Simple, flat box (not a bright/filled circle) that blends with the page

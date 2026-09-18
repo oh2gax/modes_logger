@@ -57,6 +57,14 @@ At a glance, modes_logger currently gives you:
   stands out at a glance in search history — and Squawk is now also its own
   "Search by" option, for looking up any specific squawk value, not just
   these three.
+- **Flagged-first sorting and an ad-hoc live watch** on the Live Flights page
+  — clicking the `#` column pins every flagged (Mil/Gov/Civ/eastern) and
+  currently-watched aircraft to the top, sorted by altitude, the same idea
+  as the Results page's own `#`-click toggle. A new **Watch** field next to
+  "Show only flagged" lets you type in one or more ICAO24s to temporarily
+  treat any currently-received plane as flagged, shown with a distinct
+  purple highlight, without ever touching the real watchlist — clearing the
+  field instantly reverts it.
 - **Light/dark mode** on every page, remembered across visits.
 
 ## How it works
@@ -578,6 +586,30 @@ in the normal view. A small gap also opens up between the header and the
 first flight strip in this view, so a flagged row's color doesn't sit
 flush against the header and get mistaken for it at a glance. Unchecking
 the box instantly reverts the filter, the row size, and the gap together.
+
+Clicking the `#` column header toggles the same "flagged first" idea the
+Results page has (see above): every flagged aircraft (Mil/Gov/Civ/eastern
+watchlist, or anything currently in the Watch filter below) moves to the top
+of the table, sorted by altitude ascending — lowest first, unknown altitude
+last within that group — while everything else keeps following whatever
+column sort is currently selected, just pushed below the pinned group. A
+squawk-alarm aircraft (see "Squawk alarm" below) still always sits above
+even that, unconditionally, regardless of this toggle. Click `#` again to
+turn it back off; it's off by default, like the other filters.
+
+A **Watch** field sits to the right of "Show only flagged" for temporarily
+treating one or more currently-received aircraft as flagged, without writing
+anything to the real watchlist. Type in an ICAO24 (or several, separated by
+commas or spaces) and any matching aircraft currently in range gets a
+distinct purple highlight instead of its usual color — including a plane
+that's already Mil/Gov/Civ/eastern-flagged, so it's obvious at a glance
+which one you're specifically watching right now. A watched aircraft also
+counts as "flagged" for the "Show only flagged" checkbox and the `#`
+pin-to-top toggle above, so it can't get lost in either. Clearing the field
+instantly reverts every affected row back to its normal color (or no color
+at all, if it was never actually on any watchlist) — nothing is stored
+anywhere, so the watch list is also gone the moment the page is reloaded or
+closed.
 
 ### Squawk alarm
 
