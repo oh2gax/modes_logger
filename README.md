@@ -54,13 +54,13 @@ At a glance, modes_logger currently gives you:
   sorts to the top of the table so it can't scroll out of view. The same
   three codes get a static (non-blinking) version of that highlight on the
   Results page's First/Last Squawk cells too, so a past 7500/7600/7700 case
-  stands out at a glance in search history — and Squawk is now also its own
+  stands out at a glance in search history — and Squawk is also its own
   "Search by" option, for looking up any specific squawk value, not just
   these three.
 - **Flagged-first sorting and an ad-hoc live watch** on the Live Flights page
   — clicking the `#` column pins every flagged (Mil/Gov/Civ/eastern) and
   currently-watched aircraft to the top, sorted by altitude, the same idea
-  as the Results page's own `#`-click toggle. A new **Watch** field next to
+  as the Results page's own `#`-click toggle. A **Watch** field next to
   "Show only flagged" lets you type in one or more ICAO24s to temporarily
   treat any currently-received plane as flagged, shown with a distinct
   purple highlight, without ever touching the real watchlist — clearing the
@@ -280,16 +280,10 @@ next to `modes-logger.py` and it's automatically searched alongside
 file present, nothing about the Search page changes, and every search just
 runs against current data as it always has.
 
-There's no separate toggle for this any more — including the archive was
-originally a checkbox on the Search page ("Include legacy archive
-(2007–2023)"), but since which database can actually have data for a given
-search is already fully determined by the year(s) being searched (the
-archive covers 2007–2023, `adsb_data.db` only starts in 2025 — there's no
-year the two could both plausibly answer for), the checkbox was just an
-extra step to remember rather than a real choice, so it's gone. Whether the
-archive gets queried for a given search now depends only on the same Date/
-End Date field(s) already being filled in for the main search, not a
-separate decision:
+Whether a search reaches the archive is decided automatically from the same
+Date/End Date field(s) already filled in for the main search — there's no
+separate toggle for it, since the archive (2007–2023) and `adsb_data.db`
+(starting 2025) cover entirely separate years:
 
 - **Single year, month, or day** (`2013`, `06-2013`, or `15-06-2013`) — the
   archive is searched if that year falls inside its own covered range
@@ -302,8 +296,7 @@ separate decision:
   range you gave (a range spanning, say, 2023–2026 only pulls in the 2023
   portion from the archive). This works the same way for a range as it
   does for a single date, and follows the same "up to 7 days free, longer
-  needs a value" rule described under End Date above — there's no separate,
-  stricter rule just for the archive any more, on top of it.
+  needs a value" rule described under End Date above.
 
 This is deliberately separate from `adsb_data.db`/`BaseStation.sqb`: it's
 treated as a big, read-only reference file rather than something to migrate
@@ -331,20 +324,13 @@ range) always applies before anything else does, so a request that can't
 plausibly match never opens the file at all, and one that can is bounded by
 that date/range and, where the search itself requires one, a search value.
 Registration/Type lookups for the matched rows (both from this archive and
-from `adsb_data.db`) are resolved one of two ways depending on how many
-rows actually need it: a normal search resolves each one with its own
-small query, same as this app has always done; once the match count
-reaches `BASE_LOOKUP_BULK_THRESHOLD` (1500 by default), it switches to
-loading the whole `BaseStation.sqb` table into memory once instead and
-resolving from that. The per-row way is faster for a normal day's search
-(or anything with "Show only flagged", which narrows it further); the
-bulk way is faster once a search returns a lot of rows — measured against
-the real database, a 3-month unfiltered search (64,105 rows) took 31.7
-seconds in per-row lookups alone, versus 0.77 seconds bulk-loaded, while a
-typical single day (19 rows with "Show only flagged" on) took 0.02
-seconds per-row versus 0.72 seconds if it had been bulk-loaded instead —
-which is exactly why this switches automatically rather than always doing
-one or the other.
+from `adsb_data.db`) are resolved one of two ways depending on how many rows
+actually need it: below `BASE_LOOKUP_BULK_THRESHOLD` (1500 rows by default)
+each row is resolved with its own small query, which is fastest for a
+normal day's search (or anything narrowed further by "Show only flagged");
+at or above that threshold, the whole `BaseStation.sqb` table is loaded into
+memory once instead and resolved from that, which is fastest once a search
+returns a large number of rows.
 
 A Registration search against the archive checks two sources together,
 since neither one alone is complete: the archive's own Registration field
@@ -430,7 +416,7 @@ optional and combinable (there's no separate legacy-archive toggle — see
   Registration matching looks the value up in `BaseStation.sqb` first, then
   filters the flight history by the ICAO24 hexes found there — since
   registration itself isn't stored in `adsb_data.db`. Registration is the
-  default because the app now resolves it for almost all traffic
+  default because the app resolves it for almost all traffic
   automatically; if a registration search comes back with no matches, the
   Results page suggests trying ICAO24 instead, in case that aircraft has
   been logged but its registration hasn't been resolved into
@@ -459,7 +445,7 @@ optional and combinable (there's no separate legacy-archive toggle — see
   return a large fraction of the whole flight history at once.
 - **End Date** — filling this in switches the search into a real date range
   instead of Date's substring match, with its own calendar-icon picker,
-  filled in `dd-mm-yyyy` the same way as Date. Date now acts as the range's
+  filled in `dd-mm-yyyy` the same way as Date. Date acts as the range's
   start day, so it has to be one specific day rather than a bare month or
   year once End Date is set (an on-page message explains if Date is missing,
   isn't a specific day, or falls after End Date). A flight matches if it was
