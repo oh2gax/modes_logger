@@ -323,12 +323,20 @@ range) always applies before anything else does, so a request that can't
 plausibly match never opens the file at all, and one that can is bounded by
 that date/range and, where the search itself requires one, a search value.
 Registration/Type lookups for the matched rows (both from this archive and
-from `adsb_data.db`) are resolved from one bulk-loaded in-memory copy of
-`BaseStation.sqb` per request rather than a separate database query per
-row — the difference is substantial at any real scale: a 3-month,
-unfiltered search against the real database measured 31.7 seconds in that
-per-row lookup alone before this change, and well under a second after it,
-regardless of how many rows the search actually returns.
+from `adsb_data.db`) are resolved one of two ways depending on how many
+rows actually need it: a normal search resolves each one with its own
+small query, same as this app has always done; once the match count
+reaches `BASE_LOOKUP_BULK_THRESHOLD` (1500 by default), it switches to
+loading the whole `BaseStation.sqb` table into memory once instead and
+resolving from that. The per-row way is faster for a normal day's search
+(or anything with "Show only flagged", which narrows it further); the
+bulk way is faster once a search returns a lot of rows — measured against
+the real database, a 3-month unfiltered search (64,105 rows) took 31.7
+seconds in per-row lookups alone, versus 0.77 seconds bulk-loaded, while a
+typical single day (19 rows with "Show only flagged" on) took 0.02
+seconds per-row versus 0.72 seconds if it had been bulk-loaded instead —
+which is exactly why this switches automatically rather than always doing
+one or the other.
 
 A Registration search against the archive checks two sources together,
 since neither one alone is complete: the archive's own Registration field
@@ -684,6 +692,7 @@ All tunable settings live as constants near the top of `modes-logger.py`:
 | `SQB_DB_PATH` | `<script dir>/BaseStation.sqb` | Shared aircraft registration/type database — same resolution as above |
 | `LEGACY_DB_PATH` | `<script dir>/BaseStation-legacy-2023.sqb` | Optional read-only legacy archive (see "Legacy archive" above) — same resolution as above; automatically searched whenever this file exists and the requested date(s) overlap its covered years |
 | `LEGACY_ARCHIVE_MIN_YEAR` / `LEGACY_ARCHIVE_MAX_YEAR` | `2007` / `2023` | Year range the legacy archive is assumed to cover — a search outside this range skips querying it entirely |
+| `BASE_LOOKUP_BULK_THRESHOLD` | `1500` | Row count (see "Legacy archive" above) at/above which Registration/Type lookups switch from one query per row to a single bulk-loaded copy of `BaseStation.sqb` |
 | `FETCH_INTERVAL` | `5` (seconds) | How often to poll the JSON source |
 | `MIN_UPDATE_MINUTES` | `2` | Debounce window per aircraft |
 | `FLIGHT_GAP_SECONDS` | `3600` | Gap after which a new sighting starts a new flight row |

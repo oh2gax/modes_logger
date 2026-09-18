@@ -1020,25 +1020,49 @@ def parse_legacy_datetime(value):
     except ValueError:
         return None
 
+# query()/query_legacy_flights() resolve each matched row's Registration/
+# Type from BaseStation.sqb one of two ways, whichever is actually faster
+# for how many rows there are - measured against the real database:
+#   - an individual "SELECT ... WHERE ModeS = ?" per row averages ~0.5ms
+#     each - fine for a normal day's traffic (a few hundred rows), but a
+#     3-month unfiltered range (64,105 rows) took 31.7s that way;
+#   - bulk-loading the whole Aircraft table (currently ~517k rows) into a
+#     dict up front costs a flat ~0.7-0.8s regardless of row count - a big
+#     win at that same 64,105-row scale, but pure overhead on top of an
+#     already-fast small query (a typical single day with "Show only
+#     flagged" - 19 rows in the same test - going from 0.018s to 0.72s).
+# The two cross over around 1,500 rows at these measured rates,
+# comfortably above a normal day's few hundred rows and comfortably below
+# a broad multi-week/month range - see resolve_basestation_lookup below,
+# which picks between them per request.
+BASE_LOOKUP_BULK_THRESHOLD = 1500
+
 def load_basestation_lookup(cur_base):
     """Bulk-load the CURRENT BaseStation.sqb's Aircraft table into an
-    in-memory ModeS -> (Registration, ICAOTypeCode) dict, once per request,
-    instead of one query per matched result row. query() and
-    query_legacy_flights() both used to run a separate
-    "SELECT ... WHERE ModeS = ?" for every single row they returned - fine
-    for a handful of rows, but measured against the real database it's
-    ruinous at any real scale: a 3-month, unfiltered range (64,105 rows)
-    took 31.7s just in that lookup loop. Loading the whole table (currently
-    ~517k rows) into a dict up front took 0.76s in that same test, and stays
-    that cheap regardless of how many result rows actually need it - a
-    single bulk query beats N individual ones as soon as N is more than
-    trivial, and this app now allows N to be quite large (a long Date/End
-    Date range with a search value has no upper bound on row count)."""
+    in-memory ModeS -> (Registration, ICAOTypeCode) dict - see
+    BASE_LOOKUP_BULK_THRESHOLD above for when this is actually worth it
+    versus resolving each row with its own query."""
     cur_base.execute("SELECT ModeS, Registration, ICAOTypeCode FROM Aircraft")
     return {modes: (reg, typ) for modes, reg, typ in cur_base.fetchall()}
 
+def resolve_basestation_lookup(cur_base, row_count):
+    """Return a resolve_base(icao) -> (Registration, ICAOTypeCode) or None
+    callable, backed by whichever of the two approaches described under
+    BASE_LOOKUP_BULK_THRESHOLD above is faster for row_count rows - the
+    caller doesn't need to know or care which one it got. row_count should
+    be the number of rows about to be resolved (query()'s own main-DB
+    match count) - the same decision is then reused for any legacy-archive
+    rows resolved in the same request, rather than deciding twice."""
+    if row_count >= BASE_LOOKUP_BULK_THRESHOLD:
+        base_lookup = load_basestation_lookup(cur_base)
+        return base_lookup.get
+    def resolve_base(icao):
+        cur_base.execute("SELECT Registration, ICAOTypeCode FROM Aircraft WHERE ModeS = ?", (icao,))
+        return cur_base.fetchone()
+    return resolve_base
+
 def query_legacy_flights(search_field, search_value, start_iso, end_iso, max_altitude, flagged_only,
-                          registration_icaos=None, base_lookup=None):
+                          registration_icaos=None, resolve_base=None):
     """Query the optional read-only legacy archive (see LEGACY_DB_PATH) for
     flights matching the same search_field/search_value/max_altitude/
     flagged_only filters query() applies to adsb_data.db, restricted to the
@@ -1072,15 +1096,15 @@ def query_legacy_flights(search_field, search_value, start_iso, end_iso, max_alt
     ModeS, which - unlike Registration - is essentially always populated
     here as the archive's own join key between Aircraft and Flights).
 
-    base_lookup, when given, is the dict load_basestation_lookup() returns -
+    resolve_base, when given, is a resolve_basestation_lookup() callable -
     used to fill in a still-blank Registration or ICAOTypeCode/Type for a
     matched row from the current, better-maintained source before falling
     back to "Not Found", the same way api_liveflights() backfills those for
     the live view. Otherwise a row found only by its ICAO24 (via the fix
     above) would still display as "Not Found" even though the registration
-    used to find it is already known. A plain dict lookup rather than a
-    live per-row query - see load_basestation_lookup's own docstring for
-    why that matters once a search can return a large number of rows.
+    used to find it is already known. query() decides once, from its own
+    main-DB match count, whether that callable is dict- or query-backed,
+    and reuses the same one here rather than deciding twice.
 
     Opened with SQLite's read-only URI mode as a hard guarantee this
     connection can never write to the file, on top of the fact that no
@@ -1206,10 +1230,10 @@ def query_legacy_flights(search_field, search_value, start_iso, end_iso, max_alt
             callsign = (callsign or "").strip()
             # Registration or type still blank in the legacy archive itself?
             # Try the current, better-maintained BaseStation.sqb before
-            # giving up - see the base_lookup note in this function's
+            # giving up - see the resolve_base note in this function's
             # docstring.
-            if base_lookup is not None and (not registration or not (icao_type or type_name)):
-                base_row = base_lookup.get(icao)
+            if resolve_base is not None and (not registration or not (icao_type or type_name)):
+                base_row = resolve_base(icao)
                 if base_row:
                     registration = registration or base_row[0]
                     if not (icao_type or type_name):
@@ -1416,15 +1440,6 @@ def query():
         # Default: ICAO24
         sql += " AND ICAO24 LIKE ?"
         params.append(search_value.replace("*", "%"))
-
-    # Bulk-load BaseStation.sqb once per request instead of one query per
-    # result row below (and, further down, one per legacy-archive row too) -
-    # see load_basestation_lookup's docstring for why that matters. Nothing
-    # past this point still needs a live connection to this file, so it's
-    # closed right away rather than kept open for the rest of the request.
-    base_lookup = load_basestation_lookup(cur_base)
-    conn_base.close()
-
     if range_active and range_start_epoch is not None:
         # Overlap match: the flight was active at some point between Date
         # (acting as the range's start day here) and End Date - its First
@@ -1457,11 +1472,25 @@ def query():
 
     eastern_enabled = read_eastern_red_enabled()
 
+    # Decide once, from this request's own main-DB match count, whether
+    # BaseStation.sqb lookups for it (and, below, for any legacy-archive
+    # rows too) get bulk-loaded or resolved one row at a time - see
+    # BASE_LOOKUP_BULK_THRESHOLD's comment above resolve_basestation_lookup
+    # for the reasoning and the real numbers behind it.
+    bulk_lookup = len(rows) >= BASE_LOOKUP_BULK_THRESHOLD
+    resolve_base = resolve_basestation_lookup(cur_base, len(rows))
+    if bulk_lookup:
+        # resolve_base is now backed by a dict holding everything it'll
+        # ever need - nothing past this point still needs a live
+        # connection to this file, so it's closed right away rather than
+        # kept open for the rest of the request.
+        conn_base.close()
+
     results = []
     alert_lookup = {}  # ICAO24 -> "mil"/"gov"/"civ"/"eastern", for flagged rows
     for row in rows:
         icao = row[0]
-        base = base_lookup.get(icao)
+        base = resolve_base(icao)
         registration = base[0] if base and base[0] else "Not Found"
         ac_type = base[1] if base and base[1] else "Not Found"
         results.append((icao, registration, ac_type) + row[1:])
@@ -1474,7 +1503,7 @@ def query():
     if legacy_start_iso:
         legacy_results = query_legacy_flights(
             search_field, search_value, legacy_start_iso, legacy_end_iso, max_altitude, flagged_only,
-            registration_icaos=registration_matched_icaos, base_lookup=base_lookup,
+            registration_icaos=registration_matched_icaos, resolve_base=resolve_base,
         )
         for icao, *_rest in legacy_results:
             alert = ALERT_DB.get(icao)
@@ -1488,6 +1517,12 @@ def query():
         # weren't necessarily fetched in that order, so the combined list
         # needs its own explicit sort rather than a simple concatenation.
         results.sort(key=lambda r: r[20])
+
+    if not bulk_lookup:
+        # Per-row mode kept conn_base open across the whole request (main
+        # loop above, and any legacy-archive backfill just above) - close
+        # it now that nothing else needs it.
+        conn_base.close()
 
     return render_template(
         "results.html", results=results, alert_lookup=alert_lookup,
