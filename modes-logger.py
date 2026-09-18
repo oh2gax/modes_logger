@@ -920,7 +920,7 @@ app.jinja_env.globals["is_squawk_alarm"] = is_squawk_alarm
 
 @app.route("/")
 def home():
-    return render_template("index.html", legacy_db_available=os.path.exists(LEGACY_DB_PATH))
+    return render_template("index.html")
 
 # A "date" filter this broad - a bare year ("2026") or a bare month+year
 # ("09-2026") - matches almost every row of a large history on its own,
@@ -1020,16 +1020,42 @@ def parse_legacy_datetime(value):
     except ValueError:
         return None
 
+def load_basestation_lookup(cur_base):
+    """Bulk-load the CURRENT BaseStation.sqb's Aircraft table into an
+    in-memory ModeS -> (Registration, ICAOTypeCode) dict, once per request,
+    instead of one query per matched result row. query() and
+    query_legacy_flights() both used to run a separate
+    "SELECT ... WHERE ModeS = ?" for every single row they returned - fine
+    for a handful of rows, but measured against the real database it's
+    ruinous at any real scale: a 3-month, unfiltered range (64,105 rows)
+    took 31.7s just in that lookup loop. Loading the whole table (currently
+    ~517k rows) into a dict up front took 0.76s in that same test, and stays
+    that cheap regardless of how many result rows actually need it - a
+    single bulk query beats N individual ones as soon as N is more than
+    trivial, and this app now allows N to be quite large (a long Date/End
+    Date range with a search value has no upper bound on row count)."""
+    cur_base.execute("SELECT ModeS, Registration, ICAOTypeCode FROM Aircraft")
+    return {modes: (reg, typ) for modes, reg, typ in cur_base.fetchall()}
+
 def query_legacy_flights(search_field, search_value, start_iso, end_iso, max_altitude, flagged_only,
-                          registration_icaos=None, cur_base=None):
+                          registration_icaos=None, base_lookup=None):
     """Query the optional read-only legacy archive (see LEGACY_DB_PATH) for
     flights matching the same search_field/search_value/max_altitude/
     flagged_only filters query() applies to adsb_data.db, restricted to the
-    [start_iso, end_iso) StartTime range (see legacy_date_bounds) that Date
-    already narrows it to - a single year, month, or day. Returns a list of
-    row tuples in exactly the shape query() builds its own results in, so
-    they can be appended straight into the same results list and rendered
-    by the same results.html template - or [] if the file isn't present.
+    [start_iso, end_iso) StartTime range - a single year, month, or day (see
+    legacy_date_bounds), or an arbitrary Date/End Date range's own bounds,
+    whichever query() resolved it from. Returns a list of row tuples in
+    exactly the shape query() builds its own results in, so they can be
+    appended straight into the same results list and rendered by the same
+    results.html template - or [] if the file isn't present.
+
+    search_value may be empty - same meaning as an empty one does for
+    query()'s own main-DB search: no ICAO24/Registration/Callsign/Squawk
+    narrowing at all, just the date range (and max_altitude/flagged_only,
+    if given). query() only ever calls this with an empty search_value when
+    its own guard chain already decided that's an acceptable search to run
+    (a single specific day, or a range of RANGE_FREE_MAX_DAYS or fewer) -
+    this function doesn't re-check that itself.
 
     For search_field == "registration", registration_icaos should be the
     ICAO24 hex list query() already resolved from the CURRENT, live-feed-
@@ -1046,16 +1072,15 @@ def query_legacy_flights(search_field, search_value, start_iso, end_iso, max_alt
     ModeS, which - unlike Registration - is essentially always populated
     here as the archive's own join key between Aircraft and Flights).
 
-    cur_base, when given, is an already-open cursor on the CURRENT
-    BaseStation.sqb (query() keeps its own connection open across this call
-    specifically to pass it through here) - used to fill in a still-blank
-    Registration or ICAOTypeCode/Type for a matched row from the current,
-    better-maintained source before falling back to "Not Found", the same
-    way api_liveflights() backfills those for the live view. Otherwise a
-    row found only by its ICAO24 (via the fix above) would still display as
-    "Not Found" even though the registration used to find it is already
-    known - one lookup per row that needs it, same bounded-by-a-narrow-
-    search reasoning as query()'s own per-row BaseStation.sqb lookups.
+    base_lookup, when given, is the dict load_basestation_lookup() returns -
+    used to fill in a still-blank Registration or ICAOTypeCode/Type for a
+    matched row from the current, better-maintained source before falling
+    back to "Not Found", the same way api_liveflights() backfills those for
+    the live view. Otherwise a row found only by its ICAO24 (via the fix
+    above) would still display as "Not Found" even though the registration
+    used to find it is already known. A plain dict lookup rather than a
+    live per-row query - see load_basestation_lookup's own docstring for
+    why that matters once a search can return a large number of rows.
 
     Opened with SQLite's read-only URI mode as a hard guarantee this
     connection can never write to the file, on top of the fact that no
@@ -1070,7 +1095,17 @@ def query_legacy_flights(search_field, search_value, start_iso, end_iso, max_alt
 
         match_pattern = search_value.replace("*", "%")
 
-        if search_field == "registration":
+        if not search_value:
+            # No search value - only the date range (plus max_altitude/
+            # flagged_only below) narrows this at all, same as query()'s own
+            # main-DB search when search_value is empty. No cheap existence
+            # pre-check makes sense here either, since there's no specific
+            # value to check for.
+            existence_sql = None
+            existence_params = None
+            match_clause = "1=1"
+            match_params = []
+        elif search_field == "registration":
             # Union of both sources - see the docstring above.
             or_clauses = ["Registration LIKE ?"]
             or_params = [match_pattern]
@@ -1171,12 +1206,10 @@ def query_legacy_flights(search_field, search_value, start_iso, end_iso, max_alt
             callsign = (callsign or "").strip()
             # Registration or type still blank in the legacy archive itself?
             # Try the current, better-maintained BaseStation.sqb before
-            # giving up - see the cur_base note in this function's
-            # docstring. One lookup per row that actually needs it, not per
-            # row overall.
-            if cur_base is not None and (not registration or not (icao_type or type_name)):
-                cur_base.execute("SELECT Registration, ICAOTypeCode FROM Aircraft WHERE ModeS = ?", (icao,))
-                base_row = cur_base.fetchone()
+            # giving up - see the base_lookup note in this function's
+            # docstring.
+            if base_lookup is not None and (not registration or not (icao_type or type_name)):
+                base_row = base_lookup.get(icao)
                 if base_row:
                     registration = registration or base_row[0]
                     if not (icao_type or type_name):
@@ -1214,7 +1247,6 @@ def query():
     end_date = request.args.get("end_date", "").strip()
     max_altitude = request.args.get("max_altitude", "").strip()
     flagged_only = request.args.get("flagged_only", "").strip()
-    include_legacy = request.args.get("include_legacy", "").strip()
 
     # End Date range search - End Date alone switches the query into range
     # mode, with the existing Date field doing double duty as the range's
@@ -1296,24 +1328,35 @@ def query():
             search_field=search_field, search_value=search_value,
         )
 
-    # Legacy archive (see LEGACY_DB_PATH) only ever gets queried when all of
-    # the following hold - deliberately narrow, since it's an 800MB file
-    # with millions of rows:
-    #   - the checkbox is actually ticked;
-    #   - an ICAO24/Registration/Callsign value is given (same reasoning as
-    #     the no-filter guard above, just scoped to this one extra source -
-    #     even a single year of this archive can be hundreds of thousands
-    #     of flights, so "browse a whole year" isn't allowed here even
-    #     though it's tolerated - with a value - on the main database);
-    #   - Date is one specific year, month, or day (not empty, and not a
-    #     Date/End Date range - a range could span many years, exactly the
-    #     unbounded case this is meant to avoid).
-    # When any of those doesn't hold, legacy_prefix just stays None and the
-    # rest of this request behaves exactly as if the box were unticked -
-    # this is a quiet skip, not an error, so there's nothing to flash or
-    # show on the results page about it.
+    # Legacy archive (see LEGACY_DB_PATH): there's no separate checkbox or
+    # extra condition for this any more - it's queried automatically
+    # whenever the requested date(s) could actually have data there,
+    # exactly mirroring whatever guard chain above already decided was an
+    # acceptable search to run against the main database:
+    #   - non-range: Date is one specific year, month, or day whose year
+    #     falls inside LEGACY_ARCHIVE_MIN_YEAR-LEGACY_ARCHIVE_MAX_YEAR;
+    #   - range: Date/End Date's span overlaps that same year range at all.
+    # A bare year/month with no search value never reaches here at all (the
+    # date_filter_too_broad guard above already refused it for the main
+    # database too), and a range longer than RANGE_FREE_MAX_DAYS with no
+    # search value never reaches here either (range_too_broad, same guard).
+    # So the only two additional things this checks are "is the archive
+    # file actually present" (query_legacy_flights itself, harmlessly
+    # returns [] if not) and "does the requested year range even overlap
+    # what the archive covers" - if it doesn't, legacy_start_iso just stays
+    # None and the rest of this request behaves exactly as before this
+    # feature existed. Quiet skip, not an error - nothing to flash or show.
     legacy_start_iso = legacy_end_iso = None
-    if include_legacy and search_value and date and not range_active:
+    if range_active:
+        # start_bounds/end_bounds/range_start_epoch are guaranteed set here -
+        # range_incomplete/range_invalid/range_too_broad above already
+        # returned early otherwise.
+        if start_bounds[2].year <= LEGACY_ARCHIVE_MAX_YEAR and end_bounds[2].year >= LEGACY_ARCHIVE_MIN_YEAR:
+            legacy_start_iso = start_bounds[2].strftime("%Y-%m-%d %H:%M:%S")
+            # Exclusive upper bound, one day past End Date's own midnight -
+            # same convention legacy_date_bounds uses for a single day.
+            legacy_end_iso = (end_bounds[2] + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+    elif date:
         parsed = legacy_date_bounds(date)
         if parsed:
             start_iso, end_iso, legacy_year = parsed
@@ -1373,6 +1416,15 @@ def query():
         # Default: ICAO24
         sql += " AND ICAO24 LIKE ?"
         params.append(search_value.replace("*", "%"))
+
+    # Bulk-load BaseStation.sqb once per request instead of one query per
+    # result row below (and, further down, one per legacy-archive row too) -
+    # see load_basestation_lookup's docstring for why that matters. Nothing
+    # past this point still needs a live connection to this file, so it's
+    # closed right away rather than kept open for the rest of the request.
+    base_lookup = load_basestation_lookup(cur_base)
+    conn_base.close()
+
     if range_active and range_start_epoch is not None:
         # Overlap match: the flight was active at some point between Date
         # (acting as the range's start day here) and End Date - its First
@@ -1409,8 +1461,7 @@ def query():
     alert_lookup = {}  # ICAO24 -> "mil"/"gov"/"civ"/"eastern", for flagged rows
     for row in rows:
         icao = row[0]
-        cur_base.execute("SELECT Registration, ICAOTypeCode FROM Aircraft WHERE ModeS = ?", (icao,))
-        base = cur_base.fetchone()
+        base = base_lookup.get(icao)
         registration = base[0] if base and base[0] else "Not Found"
         ac_type = base[1] if base and base[1] else "Not Found"
         results.append((icao, registration, ac_type) + row[1:])
@@ -1421,12 +1472,9 @@ def query():
     conn_main.close()
 
     if legacy_start_iso:
-        # conn_base (BaseStation.sqb) is deliberately still open here - see
-        # the cur_base note on query_legacy_flights - and only closed below,
-        # after this call, instead of alongside conn_main above.
         legacy_results = query_legacy_flights(
             search_field, search_value, legacy_start_iso, legacy_end_iso, max_altitude, flagged_only,
-            registration_icaos=registration_matched_icaos, cur_base=cur_base,
+            registration_icaos=registration_matched_icaos, base_lookup=base_lookup,
         )
         for icao, *_rest in legacy_results:
             alert = ALERT_DB.get(icao)
@@ -1441,15 +1489,12 @@ def query():
         # needs its own explicit sort rather than a simple concatenation.
         results.sort(key=lambda r: r[20])
 
-    conn_base.close()
-
     return render_template(
         "results.html", results=results, alert_lookup=alert_lookup,
         flagged_only=bool(flagged_only), date_too_broad=False,
         range_incomplete=False, range_invalid=False, range_too_broad=False,
         date_required=False,
         search_field=search_field, search_value=search_value,
-        include_legacy=bool(include_legacy),
     )
 
 @app.route("/liveflights")

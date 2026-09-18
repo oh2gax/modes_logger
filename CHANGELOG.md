@@ -4,6 +4,15 @@ All notable changes to this project are documented here, grouped by date
 (newest first). Multiple changes made on the same day are listed together
 under that day's heading.
 
+## 2026-09-18
+
+### Changed
+- Search page: the "Include legacy archive (2007–2023)" checkbox is gone. Whether a search reaches the legacy archive is now decided automatically from the Date/End Date already being searched — since the archive (2007–2023) and `adsb_data.db` (starting 2025) cover entirely separate years, which one can actually have data was never really a manual choice to begin with. A single year/month/day or a Date/End Date range both now work this way; ranges reaching the archive is new (see below).
+- Search page: a Date/End Date range search can now reach the legacy archive too, not just a single specific year/month/day like before. It follows exactly the same "up to 7 days free with just Show only flagged, anything longer needs an ICAO24/Registration/Callsign/Squawk value" rule the main database's own range search already used — the archive no longer has a separate, stricter rule of its own layered on top of it.
+
+### Fixed
+- A real performance problem in the Results page's Registration/Type lookup: both the main search and the legacy archive search were fetching each matched row's Registration/Type with a separate database query per row, in a loop. Measured against the real database, a 3-month unfiltered search took 31.7 seconds in that lookup loop alone (64,105 individual queries). Both now bulk-load `BaseStation.sqb` into memory once per request instead — the same 64,105-row case dropped to 0.77 seconds, and stays roughly that fast regardless of how many rows a search actually returns. This was already a latent problem before today (e.g. a Callsign or Squawk search matching many flights over a long date range), but became a lot easier to hit now that a value-narrowed range search has no upper bound on how many rows it can return.
+
 ## 2026-09-17
 
 ### Added

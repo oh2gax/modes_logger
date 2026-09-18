@@ -231,16 +231,6 @@
             </label>
         </div>
 
-        {% if legacy_db_available %}
-        <div class="field-group checkbox-row">
-            <label for="include_legacy">
-                <input type="checkbox" id="include_legacy" name="include_legacy" value="1">
-                Include legacy archive (2007–2023)
-            </label>
-            <div class="field-hint">Needs an ICAO24, Registration, Callsign, or Squawk value, and Date set to one specific year, month, or day (not combined with End Date) — otherwise the archive is quietly left out of the search.</div>
-        </div>
-        {% endif %}
-
         <div class="button-row">
             <button type="submit">Search</button>
             <button type="reset">Clear</button>

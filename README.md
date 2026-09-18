@@ -42,8 +42,9 @@ At a glance, modes_logger currently gives you:
   database other ADS-B tools may also read.
 - **An optional read-only legacy archive** — drop in an older
   BaseStation-format database covering years before `adsb_data.db` started,
-  and a "Include legacy archive" checkbox appears on the Search page to pull
-  matching historical flights straight into your results.
+  and matching historical flights are automatically pulled into your
+  results whenever the Date (or Date/End Date range) you search overlaps
+  the years it covers — no separate step needed.
 - **"Show flagged eastern planes as red"** — an admin-page toggle that
   recolors any *already-flagged* aircraft red when its ICAO24 falls in
   Russia's Mode-S allocation block, regardless of its Mil/Gov/Civ color.
@@ -266,10 +267,35 @@ the official watchlist matches.
 
 If you've been logging for a long time and have an older BaseStation-format
 database from a previous system, drop it in as `BaseStation-legacy-2023.sqb`
-next to `modes-logger.py` and the Search page gains an **"Include legacy
-archive (2007–2023)"** checkbox. It's entirely optional — without the file
-present, the checkbox simply doesn't appear, and everything else behaves
-exactly as it always has.
+next to `modes-logger.py` and it's automatically searched alongside
+`adsb_data.db` whenever it's relevant. It's entirely optional — without the
+file present, nothing about the Search page changes, and every search just
+runs against current data as it always has.
+
+There's no separate toggle for this any more — including the archive was
+originally a checkbox on the Search page ("Include legacy archive
+(2007–2023)"), but since which database can actually have data for a given
+search is already fully determined by the year(s) being searched (the
+archive covers 2007–2023, `adsb_data.db` only starts in 2025 — there's no
+year the two could both plausibly answer for), the checkbox was just an
+extra step to remember rather than a real choice, so it's gone. Whether the
+archive gets queried for a given search now depends only on the same Date/
+End Date field(s) already being filled in for the main search, not a
+separate decision:
+
+- **Single year, month, or day** (`2013`, `06-2013`, or `15-06-2013`) — the
+  archive is searched if that year falls inside its own covered range
+  (`LEGACY_ARCHIVE_MIN_YEAR`–`LEGACY_ARCHIVE_MAX_YEAR` below); a search for,
+  say, 2026 skips it entirely rather than running a query that could only
+  come back empty. This matches how the archive tends to actually get used:
+  "let's check that plane's movements for year 2013."
+- **A Date/End Date range** — the archive is searched if the range overlaps
+  those same covered years at all, using exactly whatever portion of the
+  range you gave (a range spanning, say, 2023–2026 only pulls in the 2023
+  portion from the archive). This works the same way for a range as it
+  does for a single date, and follows the same "up to 7 days free, longer
+  needs a value" rule described under End Date above — there's no separate,
+  stricter rule just for the archive any more, on top of it.
 
 This is deliberately separate from `adsb_data.db`/`BaseStation.sqb`: it's
 treated as a big, read-only reference file rather than something to migrate
@@ -279,33 +305,30 @@ that no write statement is ever issued against it anywhere in the code — and
 it plays no part in the live poller, registration auto-updates, or anything
 else that touches the current data.
 
-Because an archive like this can easily hold a few million historical
-flights, it's only ever queried narrowly, never scanned in full:
-
-- The checkbox has to be ticked.
-- An ICAO24, Registration, Callsign, or Squawk value has to be given in
-  Search value — the same requirement the main "please narrow your search"
-  guard already enforces, just extended to gate the archive too.
-- Date has to be one specific year, month, or day (`2013`, `06-2013`, or
-  `15-06-2013`) — not left blank, and not combined with an End Date range.
-  This matches how the archive tends to actually get used: "let's check that
-  plane's movements for year 2013," not an open-ended trawl.
-- The requested year has to fall inside the archive's own covered range
-  (`LEGACY_ARCHIVE_MIN_YEAR`–`LEGACY_ARCHIVE_MAX_YEAR` below) — a search for,
-  say, 2026 skips the archive entirely rather than running a query that
-  could only come back empty.
-
-If any of these aren't met, the archive is quietly left out of the search
-rather than showing an error — the main database is still searched
+If neither of the two conditions above is met (the requested date(s) fall
+entirely outside the archive's covered years), it's quietly left out of the
+search rather than showing an error — the main database is still searched
 normally. When the archive is included, matching flights are merged
 straight into the same results table as the current data and re-sorted
 together by last-seen time, with no separate section or visual marker,
-since having searched a specific year already tells you it's a legacy
-result. The underlying file is a standard Kinetic/BaseStation-format
-database (the same family `BaseStation.sqb` belongs to, just its own
-independent `Aircraft`/`Flights` schema rather than this app's), so if
-you've used one before with another ADS-B tool, the data should already
-look familiar.
+since having searched an old year already tells you it's a legacy result.
+The underlying file is a standard Kinetic/BaseStation-format database (the
+same family `BaseStation.sqb` belongs to, just its own independent
+`Aircraft`/`Flights` schema rather than this app's), so if you've used one
+before with another ADS-B tool, the data should already look familiar.
+
+Both a single date and a range still query it narrowly rather than ever
+scanning it in full — the date bound (or the year-overlap check for a
+range) always applies before anything else does, so a request that can't
+plausibly match never opens the file at all, and one that can is bounded by
+that date/range and, where the search itself requires one, a search value.
+Registration/Type lookups for the matched rows (both from this archive and
+from `adsb_data.db`) are resolved from one bulk-loaded in-memory copy of
+`BaseStation.sqb` per request rather than a separate database query per
+row — the difference is substantial at any real scale: a 3-month,
+unfiltered search against the real database measured 31.7 seconds in that
+per-row lookup alone before this change, and well under a second after it,
+regardless of how many rows the search actually returns.
 
 A Registration search against the archive checks two sources together,
 since neither one alone is complete: the archive's own Registration field
@@ -380,9 +403,9 @@ modernized look — rounded input/select boxes, a label above each field, and
 each box sized to what it actually holds (e.g. a narrow Max last altitude
 box, the ICAO24/Registration/Callsign dropdown sitting beside its value
 box) — kept deliberately compact so it still fits comfortably on a phone
-screen. The search form has five fields (Date required, the rest optional
-and combinable), plus a sixth that only appears when a legacy archive file
-is present (see "Legacy archive" above):
+screen. The search form has five fields, Date required and the rest
+optional and combinable (there's no separate legacy-archive toggle — see
+"Legacy archive" below for how that's included automatically):
 
 - **Search by** — a dropdown choosing what "Search value" matches against:
   `Registration` (the default), `ICAO24`, `Callsign`, or `Squawk`. All four
@@ -431,7 +454,11 @@ is present (see "Legacy archive" above):
   e.g. with just "Show only flagged", to check the last few days for
   anything flagged — but a longer range needs an ICAO24, Registration,
   Callsign, or Squawk value too, same reasoning as the bare year/month
-  protection above.
+  protection above; there's no separate upper limit beyond that once a
+  value is given, so a multi-month or multi-year range for one aircraft
+  runs the same way a short one does. A range also reaches the legacy
+  archive (see "Legacy archive" below) if it overlaps the years that
+  covers.
 - **Max last altitude** — filters to flights whose `LastAltitude` is
   strictly below the given value (in feet); leave it blank to not filter by
   altitude at all.
@@ -439,11 +466,6 @@ is present (see "Legacy archive" above):
   currently on the official watchlist or your own watchlist (see below),
   combinable with any of the fields above — but still needs Date filled in
   too, same as every other search.
-- **Include legacy archive (2007–2023)** — only shown when a legacy archive
-  file is present (see "Legacy archive" above). Pulls matching historical
-  flights from that archive into the same results, but only when Search
-  value and a single-year/month/day Date are also given — see "Legacy
-  archive" above for exactly when it does and doesn't kick in.
 
 Date has to be filled in before a search runs — Search value, Max last
 altitude, and Show only flagged only narrow an already-dated search, none of
@@ -660,7 +682,7 @@ All tunable settings live as constants near the top of `modes-logger.py`:
 | `ADSB_JSON_HOST` / `ADSB_JSON_PORT` | `127.0.0.1` / `31009` | Where to read the live aircraft JSON snapshot from |
 | `DB_NAME` | `<script dir>/adsb_data.db` | Flight history database — always resolved next to `modes-logger.py`, not the working directory, so it doesn't matter where you launch it from |
 | `SQB_DB_PATH` | `<script dir>/BaseStation.sqb` | Shared aircraft registration/type database — same resolution as above |
-| `LEGACY_DB_PATH` | `<script dir>/BaseStation-legacy-2023.sqb` | Optional read-only legacy archive (see "Legacy archive" above) — same resolution as above; the Search page's checkbox only appears when this file exists |
+| `LEGACY_DB_PATH` | `<script dir>/BaseStation-legacy-2023.sqb` | Optional read-only legacy archive (see "Legacy archive" above) — same resolution as above; automatically searched whenever this file exists and the requested date(s) overlap its covered years |
 | `LEGACY_ARCHIVE_MIN_YEAR` / `LEGACY_ARCHIVE_MAX_YEAR` | `2007` / `2023` | Year range the legacy archive is assumed to cover — a search outside this range skips querying it entirely |
 | `FETCH_INTERVAL` | `5` (seconds) | How often to poll the JSON source |
 | `MIN_UPDATE_MINUTES` | `2` | Debounce window per aircraft |
