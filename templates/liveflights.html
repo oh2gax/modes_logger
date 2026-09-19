@@ -147,6 +147,22 @@
         .flagged-filter label {
             cursor: pointer;
         }
+        /* The checkbox and its text share one <label>, which is a flex
+           item of .flagged-filter but not itself a flex container - without
+           this, the checkbox's default baseline vertical-align makes that
+           label's line box taller than its text, and the text ends up
+           sitting a couple pixels below the box's true center, while
+           "Watch:"/the input (already flex-centered internally via
+           .watch-filter-group below) don't - the two end up visibly a
+           little out of line with each other, most noticeable on a narrow
+           phone screen. Making the label itself a flex container, the same
+           way the Search page's own checkbox row does, fixes this at the
+           source. */
+        .flagged-filter > label {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
         .flagged-filter .watch-filter-group {
             display: inline-flex;
             align-items: center;
