@@ -124,6 +124,15 @@
            no reason for it to stretch as wide as the other fields did. */
         #max_altitude {
             flex: 0 0 90px;
+            -moz-appearance: textfield;
+        }
+        /* Hides the native up/down spinner - the box alone is enough for
+           entering a short altitude value, and the spinner arrows just eat
+           into that already-narrow box for no real benefit. */
+        #max_altitude::-webkit-outer-spin-button,
+        #max_altitude::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
         }
         .checkbox-row label {
             display: flex;

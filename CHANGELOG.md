@@ -4,6 +4,13 @@ All notable changes to this project are documented here, grouped by date
 (newest first). Multiple changes made on the same day are listed together
 under that day's heading.
 
+## 2026-09-19
+
+### Fixed
+- Search page: the native up/down spinner on the "Max last altitude" box is gone — the box alone is enough for entering an altitude, and the spinner arrows were just eating into an already-narrow field for no real benefit.
+- Live Flights page: the "Watch" field is narrower (enough for a couple of comma-separated ICAO24s rather than a full-width search-style box) so it fits to the right of "Show only flagged" on a phone screen instead of overlapping it; if it still doesn't fit at very narrow widths, it now wraps onto its own line with proper spacing instead of sitting flush underneath.
+- Live Flights page: added the same top spacing above the page title that the Search and Results pages already have, so the Dark/Light toggle and Search button no longer sit uncomfortably close to the title on a phone screen.
+
 ## 2026-09-18
 
 ### Added

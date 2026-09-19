@@ -27,6 +27,7 @@
         h1 {
             text-align: center;
             color: var(--header-bg);
+            margin-top: 44px;
         }
         .subtitle {
             text-align: center;
@@ -134,6 +135,14 @@
         .flagged-filter {
             margin: 10px 0 4px 0;
             font-size: 12px;
+            /* flex + row-gap (rather than plain inline flow) so that if the
+               watch-filter-group doesn't fit beside "Show only flagged" on
+               a narrow phone screen, it wraps onto its own line with clear
+               vertical spacing instead of sitting flush underneath it. */
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            row-gap: 6px;
         }
         .flagged-filter label {
             cursor: pointer;
@@ -155,7 +164,11 @@
             border: 1px solid var(--border);
             border-radius: 6px;
             padding: 3px 7px;
-            width: 200px;
+            /* Narrow enough for a couple of comma-separated ICAO24s
+               ("abcdef,abcdef") rather than a full-width search-style box,
+               so it fits to the right of "Show only flagged" on a phone
+               screen instead of forcing a wrap. */
+            width: 120px;
             box-sizing: border-box;
         }
         #watch-filter:focus {
@@ -216,7 +229,7 @@
         <label><input type="checkbox" id="flagged-only"> Show only flagged</label>
         <span class="watch-filter-group">
             <label for="watch-filter">Watch:</label>
-            <input type="text" id="watch-filter" placeholder="ICAO24, ICAO24, …" autocomplete="off">
+            <input type="text" id="watch-filter" placeholder="ICAO24,ICAO24" autocomplete="off">
         </span>
     </div>
     <div class="table-wrapper">
