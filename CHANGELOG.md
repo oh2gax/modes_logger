@@ -11,6 +11,9 @@ under that day's heading.
 - Admin page: a new "Excluded aircraft" section mirrors the existing watchlist section — its own table (with per-row Edit/Remove/Enabled controls) and its own add/edit form — for managing `plane-alert-exclude.csv` without hand-editing the file. Shares the same Apply button as the watchlist, which now reloads both lists together.
 - Admin page: the BaseStation.sqb search tool's result rows now also have an **Exclude** button next to the existing **Use** button, dropping the ICAO24/Registration/Type straight into the exclude add/edit form instead of the watchlist one — so a plane you already know is in the database can be excluded without retyping its details.
 
+### Removed
+- The `plane-alert-gov.csv`/`plane-alert-mil.csv` fallback files are no longer read. Investigation confirmed every row in both is auto-generated from, and byte-identical to, its counterpart in `plane-alert-db.csv` upstream, and since the combined file was already loaded first, these two already contributed zero entries in practice. Removing them changes nothing about which aircraft get flagged — `plane-alert-db.csv` alone (plus `tar1090-military.csv`) remains the full official watchlist source, and it's one less file an automated update would need to fetch.
+
 ## 2026-09-19
 
 ### Fixed

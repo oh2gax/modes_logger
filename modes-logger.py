@@ -67,20 +67,18 @@ SOCKET_TIMEOUT = 10          # seconds to wait for the JSON snapshot
 
 TS_FMT = "%d-%m-%Y %H:%M"    # stored human-readable format
 
-# Manually-maintained watchlists of military/government/civil aircraft,
-# from https://github.com/sdr-enthusiasts/plane-alert-db - matched by
-# ICAO24. plane-alert-db.csv is the combined upstream database and is the
-# primary source; plane-alert-gov.csv/plane-alert-mil.csv are kept only as
-# a fallback (every row in them is a byte-identical subset of the combined
-# file, so they contribute nothing once it's present, but nothing breaks if
-# it's ever missing and only the older two files exist). Loaded at startup
-# and reloadable on demand from the /admin page's Apply button.
+# Manually-maintained watchlist of military/government/civil aircraft, from
+# https://github.com/sdr-enthusiasts/plane-alert-db - matched by ICAO24.
+# plane-alert-db.csv is the combined upstream database and the sole source
+# from that project - it's a strict superset of the Mil/Gov-only CSVs the
+# project also publishes (plane-alert-gov.csv/plane-alert-mil.csv, generated
+# from this same file upstream), so there's nothing those add once this one
+# is loaded; not read by this app at all. Loaded at startup and reloadable
+# on demand from the /admin page's Apply button.
 ALERTDB_DIR = os.path.join(BASE_DIR, "alertdb")
 ALERT_MASTER_CSV = os.path.join(ALERTDB_DIR, "plane-alert-db.csv")
-ALERT_GOV_CSV = os.path.join(ALERTDB_DIR, "plane-alert-gov.csv")
-ALERT_MIL_CSV = os.path.join(ALERTDB_DIR, "plane-alert-mil.csv")
 
-# Fourth source: a military-only extract derived from the tar1090-db /
+# Second source: a military-only extract derived from the tar1090-db /
 # Mictronics aircraft database (github.com/wiedehopf/tar1090-db), the
 # database most dump1090/readsb/tar1090 setups use for hex -> registration/
 # type lookups. Same 11-column layout as the plane-alert-db files above, so
@@ -412,19 +410,16 @@ def effective_alert_category(icao24, cmpg, eastern_red_enabled):
 def load_alert_db():
     """Load the alert-db watchlists into the in-memory ALERT_DB dict.
 
-    plane-alert-db.csv (the combined upstream database) is the primary
-    source - it's a strict superset of the older plane-alert-gov.csv /
-    plane-alert-mil.csv files (every row in those two is byte-identical to
-    its counterpart here), so those two are only kept as a fallback for
-    anything the master file might be missing, and contribute nothing once
-    it's present. tar1090-military.csv is loaded last of the official
-    sources - it's a much larger, separately-sourced military extract that
-    mostly doesn't overlap the plane-alert-db lists at all, so it's there to
-    add coverage rather than to agree or disagree with them; on the rare
-    ICAO24 that does appear in an earlier file too, the earlier (more
-    curated) entry wins, same as between the other official files.
-    Whichever official file an ICAO24 is first found in wins over a later
-    one, since they're never expected to meaningfully disagree.
+    plane-alert-db.csv (the combined upstream database) is the primary and
+    only plane-alert-db source - the project's older plane-alert-gov.csv /
+    plane-alert-mil.csv derivative files are a strict subset of it (every
+    row in those two is generated from, and byte-identical to, its
+    counterpart here), so they add nothing this app doesn't already have
+    and aren't read at all. tar1090-military.csv is loaded second - it's a
+    much larger, separately-sourced military extract that mostly doesn't
+    overlap the plane-alert-db list at all, so it's there to add coverage
+    rather than to agree or disagree with it; on the rare ICAO24 that does
+    appear in both, the plane-alert-db entry (more curated) wins.
 
     plane-alert-user.csv is always loaded last and always overwrites, so a
     personal watchlist entry takes precedence over an official one for the
@@ -459,7 +454,7 @@ def load_alert_db():
     global ALERT_DB
     alert_db = {}
 
-    for path in (ALERT_MASTER_CSV, ALERT_GOV_CSV, ALERT_MIL_CSV, TAR1090_MIL_CSV):
+    for path in (ALERT_MASTER_CSV, TAR1090_MIL_CSV):
         if not os.path.exists(path):
             print(f"Alert DB: {path} not found, skipping")
             continue

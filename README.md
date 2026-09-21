@@ -145,23 +145,20 @@ Drop `plane-alert-db.csv` — the combined watchlist CSV from the
   `Pol` for police, grouped here under Government — decides its highlight
   color: light blue for Military, light green for Government, light amber
   for Civil, on both the Results page and the Live Flights page. A blank or
-  unrecognized `#CMPG` value defaults to Civil.
-- the older `plane-alert-gov.csv`/`plane-alert-mil.csv` files (from the same
-  upstream project) are still supported as an optional fallback and loaded
-  right after the master file, for anyone still using them instead of, or
-  alongside, `plane-alert-db.csv`. Since the master file is a superset of
-  both, any ICAO24 already loaded from it is left alone — this also quietly
-  handles the duplicate entries you'd otherwise get between the master file
-  and its own older derivatives.
-- a fourth, optional file, `tar1090-military.csv`, is loaded last of the
-  official sources. It's a military-only extract from the
+  unrecognized `#CMPG` value defaults to Civil. This is the project's only
+  file this app reads — the Mil/Gov-only CSVs it also publishes
+  (`plane-alert-gov.csv`/`plane-alert-mil.csv`) are auto-generated from this
+  same combined file upstream, so they never contain anything it doesn't
+  already have.
+- a second, optional file, `tar1090-military.csv`, is loaded right after
+  the master file. It's a military-only extract from the
   [tar1090-db / Mictronics](https://github.com/wiedehopf/tar1090-db)
   aircraft database — the one most dump1090/readsb/tar1090 setups use for
-  hex → registration/type lookups — in the same 11-column layout as the
-  files above, so it's picked up the same way. It mostly doesn't overlap
-  `plane-alert-db.csv` at all, so it's there to add coverage rather than to
-  agree or disagree with it; on the rare ICAO24 that does appear in an
-  earlier file too, that earlier, more-curated entry wins.
+  hex → registration/type lookups — in the same 11-column layout as
+  `plane-alert-db.csv`, so it's picked up the same way. It mostly doesn't
+  overlap `plane-alert-db.csv` at all, so it's there to add coverage rather
+  than to agree or disagree with it; on the rare ICAO24 that does appear in
+  both, the `plane-alert-db.csv` entry (more curated) wins.
 - their Registration/Aircraft Type values are written into `BaseStation.sqb`
   for those ICAO24s, since these manually-curated lists are treated as more
   trustworthy than whatever the live feed itself reports. A later live
@@ -169,10 +166,10 @@ Drop `plane-alert-db.csv` — the combined watchlist CSV from the
   — the same as any other aircraft — so this is "the CSV wins at startup,"
   not a permanent lock.
 
-All four files are optional: a missing one is logged and skipped rather
-than crashing the app. Since the project only reads them at startup (or
-when the admin page's Apply button is used), update the CSVs and
-restart/Apply to pick up changes.
+Both files are optional: a missing one is logged and skipped rather than
+crashing the app. Since the project only reads them at startup (or when the
+admin page's Apply button is used), update the CSVs and restart/Apply to
+pick up changes.
 
 ### Flagging Russian-registered aircraft red
 
@@ -753,7 +750,6 @@ All tunable settings live as constants near the top of `modes-logger.py`:
 | `POSITION_FILL_WINDOW_SECONDS` | `60` | How long after true first contact a still-blank `FirstLat`/`FirstLon`/`FirstAltitude`/`FirstTrack`/`FirstSpeed` can be backfilled |
 | `ALERTDB_DIR` | `<script dir>/alertdb` | Folder holding the optional watchlist CSVs |
 | `ALERT_MASTER_CSV` | `plane-alert-db.csv` in `ALERTDB_DIR` | The combined Mil/Gov/Civil watchlist, from [plane-alert-db](https://github.com/sdr-enthusiasts/plane-alert-db) |
-| `ALERT_GOV_CSV` / `ALERT_MIL_CSV` | `plane-alert-gov.csv` / `plane-alert-mil.csv` in `ALERTDB_DIR` | Optional fallback watchlist files, loaded after the master CSV (any ICAO24 already loaded from it is skipped) |
 | `ALERT_USER_CSV` | `plane-alert-user.csv` in `ALERTDB_DIR` | Your own watchlist, managed from `/admin` |
 | `ALERT_EXCLUDE_CSV` | `plane-alert-exclude.csv` in `ALERTDB_DIR` | Aircraft never to flag, managed from `/admin` (see "Excluding aircraft from flagging" above) — applied last, after everything else |
 | `ALERT_ENTRY_CSV_FIELDS` | 12 columns | Shared CSV column layout used by both `ALERT_USER_CSV` and `ALERT_EXCLUDE_CSV` |
@@ -788,7 +784,7 @@ This repo intentionally contains only what modes_logger itself needs to run:
 - [`modes-logger.py`](modes-logger.py) — the whole application (poller + Flask web UI)
 - [`templates/`](templates/) — the Jinja templates for the web UI (search form, results table, live flights, admin)
 - [`static/`](static/) — shared front-end assets (currently just the light/dark theme CSS/JS used by all four pages)
-- [`alertdb/`](alertdb/) — the `plane-alert-db.csv` combined watchlist (see Military/Government/Civil watchlist alerts above), the optional `plane-alert-gov.csv`/`plane-alert-mil.csv` fallback files, plus your own `plane-alert-user.csv` (see Your own watchlist above) and `plane-alert-exclude.csv` (see Excluding aircraft from flagging above)
+- [`alertdb/`](alertdb/) — the `plane-alert-db.csv` combined watchlist and optional `tar1090-military.csv` extract (see Military/Government/Civil watchlist alerts above), plus your own `plane-alert-user.csv` (see Your own watchlist above) and `plane-alert-exclude.csv` (see Excluding aircraft from flagging above)
 - `dbauth.txt` — admin page login credentials (not committed — see `.gitignore`; you create this yourself, see Your own watchlist above)
 - `requirements.txt` — the one dependency (Flask)
 - `adsb_data.db`, `BaseStation.sqb`, `admin_settings.json` — local data files, created/updated at runtime (not meant to be committed — see `.gitignore`)
