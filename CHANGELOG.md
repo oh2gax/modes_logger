@@ -14,6 +14,9 @@ under that day's heading.
 ### Removed
 - The `plane-alert-gov.csv`/`plane-alert-mil.csv` fallback files are no longer read. Investigation confirmed every row in both is auto-generated from, and byte-identical to, its counterpart in `plane-alert-db.csv` upstream, and since the combined file was already loaded first, these two already contributed zero entries in practice. Removing them changes nothing about which aircraft get flagged — `plane-alert-db.csv` alone (plus `tar1090-military.csv`) remains the full official watchlist source, and it's one less file an automated update would need to fetch.
 
+### Fixed
+- Search page: the Date/End Date picker's calendar icon wasn't showing at all on iOS Safari (iPhone/iPad) — it relied on the browser's own icon rendering inside a narrow, mostly-hidden native date input, which desktop Chrome/Edge/Safari draw but iOS Safari doesn't render the same way. It's now a small SVG icon drawn the same way everywhere, sitting on top of the still-fully-functional (but now invisible) native date input, so tapping or clicking it opens each platform's own date picker exactly as before, on every browser.
+
 ## 2026-09-19
 
 ### Fixed

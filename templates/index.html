@@ -101,24 +101,46 @@
             flex: 0 0 108px;
         }
         /* Narrow "icon-only" date picker button next to the free-text date
-           field - hides the native text/spinner parts in WebKit/Blink
-           browsers (Chrome, Edge, Safari) so just the calendar icon shows.
-           Firefox doesn't support these pseudo-elements and instead shows
-           its own already-compact native date control - a fine fallback. */
-        input[type="date"].date-picker-icon {
+           field. Relying on the browser's own calendar icon here used to
+           mean hiding everything else about the native control via
+           WebKit-only pseudo-elements - which worked on desktop Chrome/Edge/
+           Safari, but left nothing visible at all on iOS Safari (it doesn't
+           render its own icon inside a box this narrow the same way, or
+           always consistently). Drawn as our own small SVG instead, so the
+           glyph looks identical everywhere; the native date input underneath
+           stays exactly where it was, fully functional, just invisible
+           (opacity 0) - clicking/tapping anywhere in the box still opens
+           each platform's own native date picker, on every browser. */
+        .date-picker-wrap {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
             width: 22px;
+            flex: 0 0 22px;
+            cursor: pointer;
+            color: var(--subtitle-text);
+        }
+        .date-picker-wrap:hover,
+        .date-picker-wrap:focus-within {
+            color: var(--header-bg);
+        }
+        .date-picker-wrap input[type="date"] {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            margin: 0;
             border: none;
             background: transparent;
             padding: 0;
-            vertical-align: middle;
+            opacity: 0;
+            cursor: pointer;
         }
-        input[type="date"].date-picker-icon::-webkit-datetime-edit,
-        input[type="date"].date-picker-icon::-webkit-inner-spin-button,
-        input[type="date"].date-picker-icon::-webkit-clear-button {
-            display: none;
-        }
-        input[type="date"].date-picker-icon::-webkit-calendar-picker-indicator {
-            padding: 0;
+        .date-picker-wrap svg {
+            width: 16px;
+            height: 16px;
+            pointer-events: none;
         }
         /* Max last altitude: a real altitude value is at most 6 digits -
            no reason for it to stretch as wide as the other fields did. */
@@ -212,7 +234,10 @@
             <label for="date">Date (dd-mm-yyyy):</label>
             <div class="field-row">
                 <input type="text" id="date" name="date">
-                <input type="date" id="date_picker" class="date-picker-icon" title="Pick a date" aria-label="Pick a date from a calendar">
+                <span class="date-picker-wrap" title="Pick a date">
+                    <input type="date" id="date_picker" aria-label="Pick a date from a calendar">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/><path d="M8 3v3M16 3v3"/></svg>
+                </span>
             </div>
             <div class="field-hint">Required for every search — a day, a month (mm-yyyy), or a bare year.</div>
         </div>
@@ -221,7 +246,10 @@
             <label for="end_date">End Date (dd-mm-yyyy):</label>
             <div class="field-row">
                 <input type="text" id="end_date" name="end_date">
-                <input type="date" id="end_date_picker" class="date-picker-icon" title="Pick an end date" aria-label="Pick an end date from a calendar">
+                <span class="date-picker-wrap" title="Pick an end date">
+                    <input type="date" id="end_date_picker" aria-label="Pick an end date from a calendar">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/><path d="M8 3v3M16 3v3"/></svg>
+                </span>
             </div>
             <div class="field-hint">Adding this searches a range: Date above becomes the start (must be one specific day, not just a month or year). Up to 7 days works on its own (e.g. with Show only flagged); a longer range needs an ICAO24, Registration, Callsign, or Squawk value too.</div>
         </div>
