@@ -193,7 +193,7 @@
 <body>
     <button id="theme-toggle" class="theme-toggle" title="Toggle light/dark mode" aria-label="Toggle light/dark mode"></button>
     <h1>Watchlist Admin</h1>
-    <p class="subtitle">Manage your own flagged-aircraft entries (plane-alert-user.csv)</p>
+    <p class="subtitle">Manage your own flagged-aircraft entries (plane-alert-user.csv) and excluded aircraft (plane-alert-exclude.csv)</p>
 
     {% with messages = get_flashed_messages() %}
     {% if messages %}
@@ -318,6 +318,7 @@
                     <td>{{ typ }}</td>
                     <td class="actions-cell">
                         <button type="button" class="use-btn" data-icao="{{ icao }}" data-registration="{{ reg or '' }}" data-type="{{ typ or '' }}">Use</button>
+                        <button type="button" class="exclude-use-btn" data-icao="{{ icao }}" data-registration="{{ reg or '' }}" data-type="{{ typ or '' }}">Exclude</button>
                         <button type="button" class="db-edit-btn" data-icao="{{ icao }}" data-registration="{{ reg or '' }}" data-type="{{ typ or '' }}">Edit</button>
                         <form method="post" action="{{ url_for('admin_db_delete') }}" class="inline-form"
                               onsubmit="return confirm('Delete {{ icao }}{% if reg %} ({{ reg }}){% endif %} from BaseStation.sqb? This directly removes it from the shared database and cannot be undone.');" style="display:inline;">
@@ -368,8 +369,106 @@
         <button type="submit">Save entry</button>
     </form>
 
+    <div class="panel" id="exclude">
+        <h2>Excluded aircraft</h2>
+        <p class="no-results">Aircraft listed here are never flagged, even if they appear in the official watchlists above or in your own personal entries — exclusion always wins. Same CSV format as the watchlist, so a line can be copied directly from any plane-alert-*.csv file.</p>
+    </div>
+
+    <p class="no-results">Italic cells are looked up from <code>BaseStation.sqb</code> for planes already seen before — not stored in <code>plane-alert-exclude.csv</code>.</p>
+    <div class="table-wrapper">
+    <table>
+        <thead>
+            <tr>
+                <th class="numbering">#</th>
+                <th>ICAO24</th>
+                <th>Registration</th>
+                <th>Operator</th>
+                <th>Type</th>
+                <th>CMPG</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in exclude_rows %}
+            {% set e = row.raw %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td>{{ e['$ICAO'] }}</td>
+                <td class="{{ 'from-basestation' if row.reg_from_basestation else '' }}"
+                    {% if row.reg_from_basestation %}title="Looked up from BaseStation.sqb — not stored in plane-alert-exclude.csv"{% endif %}>{{ row.display_registration }}</td>
+                <td>{{ e['$Operator'] }}</td>
+                <td class="{{ 'from-basestation' if row.type_from_basestation else '' }}"
+                    {% if row.type_from_basestation %}title="Looked up from BaseStation.sqb — not stored in plane-alert-exclude.csv"{% endif %}>{{ row.display_type }}</td>
+                <td>{{ row.cmpg_label }}</td>
+                <td class="actions-cell">
+                    <button type="button" class="exclude-edit-btn"
+                        data-icao="{{ e['$ICAO'] }}"
+                        data-registration="{{ e['$Registration'] }}"
+                        data-operator="{{ e['$Operator'] }}"
+                        data-type="{{ e['$Type'] }}"
+                        data-icao_type="{{ e['$ICAO Type'] }}"
+                        data-cmpg="{{ e['#CMPG'] }}"
+                        data-tag1="{{ e['$Tag 1'] }}"
+                        data-tag2="{{ e['$#Tag 2'] }}"
+                        data-tag3="{{ e['$#Tag 3'] }}"
+                        data-category="{{ e['Category'] }}"
+                        data-link="{{ e['$#Link'] }}">Edit</button>
+                    <form method="post" action="{{ url_for('admin_exclude_remove') }}" class="inline-form"
+                          onsubmit="return confirm('Remove {{ e['$ICAO'] }} from the exclude list?');" style="display:inline;">
+                        <input type="hidden" name="icao" value="{{ e['$ICAO'] }}">
+                        <button type="submit">Remove</button>
+                    </form>
+                    <form method="post" action="{{ url_for('admin_exclude_toggle_enabled') }}" class="inline-form" style="display:inline;">
+                        <input type="hidden" name="icao" value="{{ e['$ICAO'] }}">
+                        <label class="enabled-label">
+                            <input type="checkbox" {% if row.enabled %}checked{% endif %} onchange="this.form.submit()">
+                            Enabled
+                        </label>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+            {% if not exclude_rows %}
+            <tr><td colspan="7" class="no-results">No excluded aircraft yet.</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+    </div>
+
+    <form method="post" action="{{ url_for('admin_exclude_save') }}" id="exclude-entry-form" class="entry-form">
+        <div class="form-row">
+            <label>ICAO24 <input type="text" id="exclude_icao" name="icao" maxlength="6" required placeholder="e.g. 4CA1B2"></label>
+            <label>Registration <input type="text" id="exclude_registration" name="registration" placeholder="e.g. OH-ABC"></label>
+            <label>Type <input type="text" id="exclude_type" name="type" placeholder="e.g. Boeing 737"></label>
+            <label>CMPG
+                <select id="exclude_cmpg" name="cmpg">
+                    {% for value in allowed_cmpg %}
+                    <option value="{{ value }}" {% if value == 'Civ' %}selected{% endif %}>{{ cmpg_display_labels.get(value, value) }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+        </div>
+        <details>
+            <summary>More fields (optional)</summary>
+            <div class="form-row">
+                <label>Operator <input type="text" id="exclude_operator" name="operator"></label>
+                <label>ICAO Type <input type="text" id="exclude_icao_type" name="icao_type" placeholder="e.g. B738"></label>
+                <label>Category <input type="text" id="exclude_category" name="category"></label>
+            </div>
+            <div class="form-row">
+                <label>Tag 1 <input type="text" id="exclude_tag1" name="tag1"></label>
+                <label>Tag 2 <input type="text" id="exclude_tag2" name="tag2"></label>
+                <label>Tag 3 <input type="text" id="exclude_tag3" name="tag3"></label>
+            </div>
+            <div class="form-row">
+                <label>Link <input type="text" id="exclude_link" name="link"></label>
+            </div>
+        </details>
+        <button type="submit">Save exclude entry</button>
+    </form>
+
     <form method="post" action="{{ url_for('admin_reload') }}" class="apply-form">
-        <button type="submit">Apply (reload watchlist now)</button>
+        <button type="submit">Apply (reload watchlist &amp; exclude list now)</button>
     </form>
 
     <div class="panel" id="db-editor">
@@ -402,6 +501,20 @@
             });
         });
 
+        document.querySelectorAll('.exclude-edit-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var fields = ['icao', 'registration', 'operator', 'type', 'icao_type', 'cmpg', 'tag1', 'tag2', 'tag3', 'category', 'link'];
+                fields.forEach(function (f) {
+                    var el = document.getElementById('exclude_' + f);
+                    if (el) el.value = btn.dataset[f] || '';
+                });
+                var form = document.getElementById('exclude-entry-form');
+                if (form) form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                var icaoEl = document.getElementById('exclude_icao');
+                if (icaoEl) icaoEl.focus();
+            });
+        });
+
         document.querySelectorAll('.use-btn').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var icaoEl = document.getElementById('icao');
@@ -413,6 +526,21 @@
                 var form = document.getElementById('entry-form');
                 if (form) form.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 var cmpgEl = document.getElementById('cmpg');
+                if (cmpgEl) cmpgEl.focus();
+            });
+        });
+
+        document.querySelectorAll('.exclude-use-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var icaoEl = document.getElementById('exclude_icao');
+                var regEl = document.getElementById('exclude_registration');
+                var typeEl = document.getElementById('exclude_type');
+                if (icaoEl) icaoEl.value = btn.dataset.icao || '';
+                if (regEl) regEl.value = btn.dataset.registration || '';
+                if (typeEl) typeEl.value = btn.dataset.type || '';
+                var form = document.getElementById('exclude-entry-form');
+                if (form) form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                var cmpgEl = document.getElementById('exclude_cmpg');
                 if (cmpgEl) cmpgEl.focus();
             });
         });

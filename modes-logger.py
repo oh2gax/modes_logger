@@ -95,7 +95,22 @@ TAR1090_MIL_CSV = os.path.join(ALERTDB_DIR, "tar1090-military.csv")
 # also be opened and hand-edited in a spreadsheet. Only $ICAO is required
 # in practice.
 ALERT_USER_CSV = os.path.join(ALERTDB_DIR, "plane-alert-user.csv")
-USER_CSV_FIELDS = [
+
+# Exclude list, also edited from /admin: an ICAO24 listed and enabled here
+# is never flagged, no matter which of the sources above (or the personal
+# watchlist) it also appears on - for aircraft that are technically
+# Mil/Gov/Civ-classified but not worth highlighting every time (e.g. common
+# local military traffic). Same file format and same ALERT_ENTRY_CSV_FIELDS
+# layout as plane-alert-user.csv, purely so a line can be copied straight in
+# from any plane-alert-*.csv file (official or personal) without having to
+# reformat it - only $ICAO and Enabled actually matter for exclusion itself;
+# the rest of the columns just carry over as reference/documentation for why
+# a row is there.
+ALERT_EXCLUDE_CSV = os.path.join(ALERTDB_DIR, "plane-alert-exclude.csv")
+
+# Shared 12-column layout for both of the CSV files above - the 11 columns
+# the upstream plane-alert-db project uses, plus our own "Enabled".
+ALERT_ENTRY_CSV_FIELDS = [
     "$ICAO", "$Registration", "$Operator", "$Type", "$ICAO Type", "#CMPG",
     "$Tag 1", "$#Tag 2", "$#Tag 3", "Category", "$#Link", "Enabled",
 ]
@@ -183,7 +198,10 @@ TRANSITION_ALTITUDE_FT = 5000        # matches liveflights.html's own FL/ft cuto
 # "registration":, "operator":, "type":}. "source" is the trust axis (does
 # this get written into BaseStation.sqb - see sync_alert_db_to_basestation);
 # "cmpg" is the color axis (which highlight color a row gets), independent
-# of where the entry came from. Populated at startup by load_alert_db(),
+# of where the entry came from. An ICAO24 listed and enabled in
+# ALERT_EXCLUDE_CSV never ends up in here at all, regardless of which
+# source(s) it would otherwise come from - see load_alert_db. Populated at
+# startup by load_alert_db(),
 # and reloadable on demand from the /admin page's Apply button - so, unlike
 # before the admin page existed, this is no longer purely read-only after
 # startup. ALERT_DB_LOCK guards the reassignment against the poller thread
@@ -420,6 +438,22 @@ def load_alert_db():
     is the different question of whether it's trustworthy enough to write
     into BaseStation.sqb - see sync_alert_db_to_basestation.
 
+    Finally, plane-alert-exclude.csv is applied last of all, as a pure
+    subtraction: an ICAO24 listed and enabled there is dropped from the
+    combined dict, however it got there - official source, personal
+    watchlist, doesn't matter. This is deliberately the final word, so it's
+    possible to exclude something you've also explicitly added to your own
+    watchlist (the exclude entry wins). An excluded aircraft isn't in
+    ALERT_DB at all afterward, so everywhere else in the app it's
+    indistinguishable from a plane that was never on any watchlist - no
+    special-casing needed anywhere but here. One side effect: because
+    sync_alert_db_to_basestation only ever syncs what's in ALERT_DB,
+    excluding a plane also means it stops getting that curated-source
+    Registration/Type sync into BaseStation.sqb - a deliberate simplicity
+    trade-off (it'll still be populated normally from the live feed like any
+    other aircraft), consistent with an excluded plane being treated as
+    perfectly ordinary in every other respect too.
+
     Every file here is optional - a missing or unreadable one is logged
     and skipped rather than crashing the app."""
     global ALERT_DB
@@ -456,9 +490,9 @@ def load_alert_db():
 
     try:
         count = 0
-        for row in read_user_entries():
+        for row in read_csv_entries(ALERT_USER_CSV):
             icao = (row.get("$ICAO") or "").strip().upper().zfill(6)
-            if not icao or not is_user_entry_enabled(row):
+            if not icao or not is_entry_enabled(row):
                 continue
             alert_db[icao] = {
                 "source": "user",
@@ -471,6 +505,18 @@ def load_alert_db():
         print(f"Alert DB: loaded {count} user entries from {ALERT_USER_CSV}")
     except Exception as e:
         print(f"Alert DB: failed to load {ALERT_USER_CSV}: {e}")
+
+    try:
+        excluded_icaos = set()
+        for row in read_csv_entries(ALERT_EXCLUDE_CSV):
+            icao = (row.get("$ICAO") or "").strip().upper().zfill(6)
+            if icao and is_entry_enabled(row):
+                excluded_icaos.add(icao)
+        if excluded_icaos:
+            alert_db = {icao: info for icao, info in alert_db.items() if icao not in excluded_icaos}
+        print(f"Alert DB: {len(excluded_icaos)} ICAO24(s) excluded via {ALERT_EXCLUDE_CSV}")
+    except Exception as e:
+        print(f"Alert DB: failed to load {ALERT_EXCLUDE_CSV}: {e}")
 
     with ALERT_DB_LOCK:
         ALERT_DB = alert_db
@@ -558,43 +604,49 @@ def login_required(view):
         return view(*args, **kwargs)
     return wrapped
 
-def ensure_user_csv():
-    """Create alertdb/plane-alert-user.csv with just the header row if it
-    doesn't already exist. If it exists with an older/shorter header (e.g.
-    from before the Enabled column was added), migrate it in place -
-    existing rows keep their data, and any newly-added column defaults to
-    a safe value (Enabled defaults to "1", i.e. unchanged behavior)."""
-    if not os.path.exists(ALERT_USER_CSV):
+def ensure_csv(path):
+    """Create an alert-db-format CSV (plane-alert-user.csv or
+    plane-alert-exclude.csv) with just the header row if it doesn't already
+    exist. If it exists with an older/shorter header (e.g. from before the
+    Enabled column was added), migrate it in place - existing rows keep
+    their data, and any newly-added column defaults to a safe value
+    (Enabled defaults to "1", i.e. unchanged behavior). Shared by both
+    files below - same 12-column ALERT_ENTRY_CSV_FIELDS layout, same
+    migration behavior."""
+    if not os.path.exists(path):
         os.makedirs(ALERTDB_DIR, exist_ok=True)
-        with open(ALERT_USER_CSV, "w", newline="", encoding="utf-8") as f:
-            csv.writer(f).writerow(USER_CSV_FIELDS)
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow(ALERT_ENTRY_CSV_FIELDS)
         return
-    with open(ALERT_USER_CSV, newline="", encoding="utf-8") as f:
+    with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        if reader.fieldnames == USER_CSV_FIELDS:
+        if reader.fieldnames == ALERT_ENTRY_CSV_FIELDS:
             return  # already up to date
         rows = list(reader)
     for row in rows:
         row.setdefault("Enabled", "1")
-    tmp_path = ALERT_USER_CSV + ".tmp"
+    tmp_path = path + ".tmp"
     with open(tmp_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=USER_CSV_FIELDS)
+        writer = csv.DictWriter(f, fieldnames=ALERT_ENTRY_CSV_FIELDS)
         writer.writeheader()
         for row in rows:
-            writer.writerow({k: row.get(k, "") for k in USER_CSV_FIELDS})
-    os.replace(tmp_path, ALERT_USER_CSV)
+            writer.writerow({k: row.get(k, "") for k in ALERT_ENTRY_CSV_FIELDS})
+    os.replace(tmp_path, path)
 
-def is_user_entry_enabled(row):
+def is_entry_enabled(row):
     """True unless the row's Enabled column is explicitly falsy. Missing
-    or blank (e.g. a row saved before the Enabled column existed) counts
-    as enabled, so nothing silently stops being flagged after upgrading."""
+    or blank (e.g. a row saved before the Enabled column existed, or a line
+    pasted in from an 11-column upstream file with no Enabled value at all)
+    counts as enabled, so nothing silently stops being flagged/excluded
+    after upgrading or pasting a shorter row in by hand."""
     val = (row.get("Enabled") or "").strip().lower()
     return val not in ("0", "false", "no", "off")
 
-def read_user_entries():
-    """Read alertdb/plane-alert-user.csv as a list of dicts, in file order."""
-    ensure_user_csv()
-    with open(ALERT_USER_CSV, newline="", encoding="utf-8") as f:
+def read_csv_entries(path):
+    """Read an alert-db-format CSV (plane-alert-user.csv or
+    plane-alert-exclude.csv) as a list of dicts, in file order."""
+    ensure_csv(path)
+    with open(path, newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
 
 def lookup_basestation(cur_base, icao24):
@@ -610,17 +662,104 @@ def lookup_basestation(cur_base, icao24):
         return (None, None)
     return (row[0] or None, row[1] or None)
 
-def write_user_entries(entries):
-    """Rewrite plane-alert-user.csv from a list of dicts, atomically (write
-    to a temp file, then replace it) so a crash mid-write can't corrupt it."""
-    ensure_user_csv()
-    tmp_path = ALERT_USER_CSV + ".tmp"
+def write_csv_entries(path, entries):
+    """Rewrite an alert-db-format CSV from a list of dicts, atomically
+    (write to a temp file, then replace it) so a crash mid-write can't
+    corrupt it."""
+    ensure_csv(path)
+    tmp_path = path + ".tmp"
     with open(tmp_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=USER_CSV_FIELDS)
+        writer = csv.DictWriter(f, fieldnames=ALERT_ENTRY_CSV_FIELDS)
         writer.writeheader()
         for row in entries:
-            writer.writerow({k: row.get(k, "") for k in USER_CSV_FIELDS})
-    os.replace(tmp_path, ALERT_USER_CSV)
+            writer.writerow({k: row.get(k, "") for k in ALERT_ENTRY_CSV_FIELDS})
+    os.replace(tmp_path, path)
+
+def save_alert_entry(path, form):
+    """Add or edit one row in an alert-db-format CSV, keyed by $ICAO -
+    shared by the personal-watchlist and exclude-list admin routes below,
+    since both use the same fields and the same "editing preserves the
+    row's current Enabled state rather than resetting it" behavior. Returns
+    the ICAO24 written, or None if the form's ICAO24 was missing/invalid."""
+    icao = form.get("icao", "").strip().upper().zfill(6)
+    if not icao or len(icao) != 6:
+        return None
+
+    cmpg = form.get("cmpg", "").strip()
+    if cmpg not in ALLOWED_CMPG:
+        cmpg = "Civ"
+
+    row = {
+        "$ICAO": icao,
+        "$Registration": form.get("registration", "").strip(),
+        "$Operator": form.get("operator", "").strip(),
+        "$Type": form.get("type", "").strip(),
+        "$ICAO Type": form.get("icao_type", "").strip(),
+        "#CMPG": cmpg,
+        "$Tag 1": form.get("tag1", "").strip(),
+        "$#Tag 2": form.get("tag2", "").strip(),
+        "$#Tag 3": form.get("tag3", "").strip(),
+        "Category": form.get("category", "").strip(),
+        "$#Link": form.get("link", "").strip(),
+        "Enabled": "1",
+    }
+
+    entries = read_csv_entries(path)
+    for i, existing in enumerate(entries):
+        if (existing.get("$ICAO") or "").strip().upper().zfill(6) == icao:
+            # Editing an existing entry shouldn't silently re-enable a row
+            # that was deliberately disabled - carry its current Enabled
+            # state forward instead of resetting to "1".
+            row["Enabled"] = existing.get("Enabled") or "1"
+            entries[i] = row
+            break
+    else:
+        entries.append(row)
+    write_csv_entries(path, entries)
+    return icao
+
+def remove_alert_entry(path, icao):
+    """Remove one row (by ICAO24) from an alert-db-format CSV."""
+    entries = read_csv_entries(path)
+    remaining = [e for e in entries if (e.get("$ICAO") or "").strip().upper().zfill(6) != icao]
+    write_csv_entries(path, remaining)
+
+def toggle_alert_entry_enabled(path, icao):
+    """Flip one row's Enabled column. Returns the new enabled state
+    (True/False), or None if that ICAO24 wasn't found in the file."""
+    entries = read_csv_entries(path)
+    for e in entries:
+        if (e.get("$ICAO") or "").strip().upper().zfill(6) == icao:
+            currently_enabled = is_entry_enabled(e)
+            e["Enabled"] = "0" if currently_enabled else "1"
+            write_csv_entries(path, entries)
+            return not currently_enabled
+    return None
+
+def build_display_rows(entries, cur_base):
+    """Turn a list of raw CSV row-dicts (from plane-alert-user.csv or
+    plane-alert-exclude.csv) into the richer per-row view /admin's
+    templates render: the raw row itself, a Registration/Type to display
+    (falling back to a BaseStation.sqb lookup, display-only, never written
+    back to the CSV - see lookup_basestation), and a human-readable CMPG
+    label. Shared by the watchlist and exclude-list tables, which both
+    build this exact same shape."""
+    display_rows = []
+    for e in entries:
+        reg_lookup = type_lookup = None
+        if not e.get("$Registration") or not (e.get("$Type") or e.get("$ICAO Type")):
+            reg_lookup, type_lookup = lookup_basestation(cur_base, e.get("$ICAO", ""))
+        raw_cmpg = (e.get("#CMPG") or "").strip()
+        display_rows.append({
+            "raw": e,
+            "display_registration": e.get("$Registration") or reg_lookup or "",
+            "display_type": e.get("$Type") or e.get("$ICAO Type") or type_lookup or "",
+            "reg_from_basestation": bool(reg_lookup) and not e.get("$Registration"),
+            "type_from_basestation": bool(type_lookup) and not (e.get("$Type") or e.get("$ICAO Type")),
+            "cmpg_label": CMPG_DISPLAY_LABELS.get(raw_cmpg, raw_cmpg or "—"),
+            "enabled": is_entry_enabled(e),
+        })
+    return display_rows
 
 # ---------------- Fetch & Process ----------------
 def fetch_json_snapshot(host, port, timeout=SOCKET_TIMEOUT):
@@ -1590,46 +1729,37 @@ def api_liveflights():
 @app.route("/admin")
 def admin():
     logged_in = bool(session.get("admin_logged_in"))
-    # Everything below - the watchlist entries themselves, the DB search
-    # tool, and the eastern-red toggle's current state - is only built and
-    # sent to the template when logged in. This isn't just a template-level
-    # hiding decision: a logged-out request never even reads
-    # plane-alert-user.csv or the eastern-red setting, so a crafted request
-    # can't recover them either.
+    # Everything below - the watchlist/exclude entries themselves, the DB
+    # search tool, and the eastern-red toggle's current state - is only
+    # built and sent to the template when logged in. This isn't just a
+    # template-level hiding decision: a logged-out request never even reads
+    # plane-alert-user.csv, plane-alert-exclude.csv, or the eastern-red
+    # setting, so a crafted request can't recover them either.
     db_query = ""
     db_results = []
     rows = []
+    exclude_rows = []
     eastern_red_enabled = None
 
     if logged_in:
-        entries = read_user_entries()
+        entries = read_csv_entries(ALERT_USER_CSV)
+        exclude_entries = read_csv_entries(ALERT_EXCLUDE_CSV)
         eastern_red_enabled = read_eastern_red_enabled()
         db_query = request.args.get("db_q", "").strip()
 
-        # Display only - never written back to plane-alert-user.csv. An entry
-        # that only specifies an ICAO24 (or leaves Registration/Type blank)
-        # gets those fields filled in from BaseStation.sqb when that aircraft
-        # has already been logged, e.g. a friend's plane that's flown past
-        # before. That way "just watch this ICAO24" still shows something
-        # meaningful here, and if the entry is later removed, nothing about
-        # it was ever added to the CSV beyond what was actually typed in.
+        # Display only - never written back to the CSVs themselves. An
+        # entry that only specifies an ICAO24 (or leaves Registration/Type
+        # blank) gets those fields filled in from BaseStation.sqb when that
+        # aircraft has already been logged, e.g. a friend's plane that's
+        # flown past before. That way "just watch/exclude this ICAO24"
+        # still shows something meaningful here, and if the entry is later
+        # removed, nothing about it was ever added to the CSV beyond what
+        # was actually typed in. See build_display_rows.
         conn_base = sqlite3.connect(SQB_DB_PATH)
         try:
             cur_base = conn_base.cursor()
-            for e in entries:
-                reg_lookup = type_lookup = None
-                if not e.get("$Registration") or not (e.get("$Type") or e.get("$ICAO Type")):
-                    reg_lookup, type_lookup = lookup_basestation(cur_base, e.get("$ICAO", ""))
-                raw_cmpg = (e.get("#CMPG") or "").strip()
-                rows.append({
-                    "raw": e,
-                    "display_registration": e.get("$Registration") or reg_lookup or "",
-                    "display_type": e.get("$Type") or e.get("$ICAO Type") or type_lookup or "",
-                    "reg_from_basestation": bool(reg_lookup) and not e.get("$Registration"),
-                    "type_from_basestation": bool(type_lookup) and not (e.get("$Type") or e.get("$ICAO Type")),
-                    "cmpg_label": CMPG_DISPLAY_LABELS.get(raw_cmpg, raw_cmpg or "—"),
-                    "enabled": is_user_entry_enabled(e),
-                })
+            rows = build_display_rows(entries, cur_base)
+            exclude_rows = build_display_rows(exclude_entries, cur_base)
 
             if db_query:
                 # Same ICAO24-or-Registration, *-wildcard search as the main
@@ -1649,6 +1779,7 @@ def admin():
     return render_template(
         "admin.html",
         rows=rows,
+        exclude_rows=exclude_rows,
         logged_in=logged_in,
         auth_configured=os.path.exists(DBAUTH_PATH),
         eastern_red_enabled=eastern_red_enabled,
@@ -1678,42 +1809,10 @@ def admin_logout():
 @app.route("/admin/save", methods=["POST"])
 @login_required
 def admin_save():
-    icao = request.form.get("icao", "").strip().upper().zfill(6)
-    if not icao or len(icao) != 6:
+    icao = save_alert_entry(ALERT_USER_CSV, request.form)
+    if not icao:
         flash("ICAO24 is required and must be a valid hex code.")
         return redirect(url_for("admin"))
-
-    cmpg = request.form.get("cmpg", "").strip()
-    if cmpg not in ALLOWED_CMPG:
-        cmpg = "Civ"
-
-    row = {
-        "$ICAO": icao,
-        "$Registration": request.form.get("registration", "").strip(),
-        "$Operator": request.form.get("operator", "").strip(),
-        "$Type": request.form.get("type", "").strip(),
-        "$ICAO Type": request.form.get("icao_type", "").strip(),
-        "#CMPG": cmpg,
-        "$Tag 1": request.form.get("tag1", "").strip(),
-        "$#Tag 2": request.form.get("tag2", "").strip(),
-        "$#Tag 3": request.form.get("tag3", "").strip(),
-        "Category": request.form.get("category", "").strip(),
-        "$#Link": request.form.get("link", "").strip(),
-        "Enabled": "1",
-    }
-
-    entries = read_user_entries()
-    for i, existing in enumerate(entries):
-        if (existing.get("$ICAO") or "").strip().upper().zfill(6) == icao:
-            # Editing an existing entry shouldn't silently re-enable a row
-            # the user had deliberately disabled - carry its current
-            # Enabled state forward instead of resetting to "1".
-            row["Enabled"] = existing.get("Enabled") or "1"
-            entries[i] = row
-            break
-    else:
-        entries.append(row)
-    write_user_entries(entries)
     flash(f"Saved {icao}. Click Apply to make it active for flagging.")
     return redirect(url_for("admin"))
 
@@ -1721,9 +1820,7 @@ def admin_save():
 @login_required
 def admin_remove():
     icao = request.form.get("icao", "").strip().upper().zfill(6)
-    entries = read_user_entries()
-    remaining = [e for e in entries if (e.get("$ICAO") or "").strip().upper().zfill(6) != icao]
-    write_user_entries(remaining)
+    remove_alert_entry(ALERT_USER_CSV, icao)
     flash(f"Removed {icao}. Click Apply to make it active for flagging.")
     return redirect(url_for("admin"))
 
@@ -1731,14 +1828,36 @@ def admin_remove():
 @login_required
 def admin_toggle_enabled():
     icao = request.form.get("icao", "").strip().upper().zfill(6)
-    entries = read_user_entries()
-    for e in entries:
-        if (e.get("$ICAO") or "").strip().upper().zfill(6) == icao:
-            currently_enabled = is_user_entry_enabled(e)
-            e["Enabled"] = "0" if currently_enabled else "1"
-            write_user_entries(entries)
-            flash(f"{icao} {'disabled' if currently_enabled else 'enabled'}. Click Apply to make it active for flagging.")
-            break
+    new_state = toggle_alert_entry_enabled(ALERT_USER_CSV, icao)
+    if new_state is not None:
+        flash(f"{icao} {'enabled' if new_state else 'disabled'}. Click Apply to make it active for flagging.")
+    return redirect(url_for("admin"))
+
+@app.route("/admin/exclude/save", methods=["POST"])
+@login_required
+def admin_exclude_save():
+    icao = save_alert_entry(ALERT_EXCLUDE_CSV, request.form)
+    if not icao:
+        flash("ICAO24 is required and must be a valid hex code.")
+        return redirect(url_for("admin"))
+    flash(f"Excluded {icao}. Click Apply to make it active.")
+    return redirect(url_for("admin"))
+
+@app.route("/admin/exclude/remove", methods=["POST"])
+@login_required
+def admin_exclude_remove():
+    icao = request.form.get("icao", "").strip().upper().zfill(6)
+    remove_alert_entry(ALERT_EXCLUDE_CSV, icao)
+    flash(f"Removed {icao} from exclude list. Click Apply to make it active.")
+    return redirect(url_for("admin"))
+
+@app.route("/admin/exclude/toggle_enabled", methods=["POST"])
+@login_required
+def admin_exclude_toggle_enabled():
+    icao = request.form.get("icao", "").strip().upper().zfill(6)
+    new_state = toggle_alert_entry_enabled(ALERT_EXCLUDE_CSV, icao)
+    if new_state is not None:
+        flash(f"{icao} exclusion {'enabled' if new_state else 'disabled'}. Click Apply to make it active.")
     return redirect(url_for("admin"))
 
 @app.route("/admin/settings", methods=["POST"])
@@ -1833,7 +1952,8 @@ def admin_db_delete():
 if __name__ == "__main__":
     init_db()
     init_basestation_db()
-    ensure_user_csv()
+    ensure_csv(ALERT_USER_CSV)
+    ensure_csv(ALERT_EXCLUDE_CSV)
     load_alert_db()
     sync_alert_db_to_basestation()
     from threading import Thread

@@ -34,6 +34,11 @@ At a glance, modes_logger currently gives you:
   exactly like the official lists, an Enabled tickbox to temporarily pull an
   entry out of flagging without deleting it, and a small BaseStation.sqb
   search tool to help you find an ICAO24/registration to add.
+- **An exclude list** — also on the admin page, a mirror-image section for
+  aircraft you never want flagged, even if they're on an official watchlist
+  or your own personal one (e.g. common local military traffic that isn't
+  worth highlighting every time). Exclusion always wins over every other
+  source.
 - **A BaseStation.sqb database editor** — also on the admin page, a separate
   section for directly adding, modifying, or deleting an entry in
   `BaseStation.sqb` itself (ICAO24, Registration, ICAO Type), for when you
@@ -245,7 +250,9 @@ stop watching that plane, nothing about it is left behind. The admin page
 also has its own small search tool for `BaseStation.sqb` itself — search by
 ICAO24 or Registration (wildcards supported) to find a plane the app has
 already logged, then click **Use** to drop its ICAO24/Registration/Type
-straight into the add/edit form above.
+straight into the watchlist add/edit form above, or **Exclude** to drop the
+same values into the exclude add/edit form instead (see "Excluding aircraft
+from flagging" below).
 
 That same search tool's results also have **Edit** and **Delete** buttons,
 for a separate **Database editor** section at the very bottom of the admin
@@ -270,6 +277,33 @@ Matches from this list are highlighted the same way as the official
 lists — light blue/light green/light amber by CMPG — and are included in
 "Show only flagged" on both the Results and Live Flights pages alongside
 the official watchlist matches.
+
+## Excluding aircraft from flagging
+
+Alongside your own watchlist, the admin page has a mirror-image "Excluded
+aircraft" section, backed by a separate `alertdb/plane-alert-exclude.csv`
+file. An aircraft listed and enabled there is never flagged — regardless of
+whether it's on the official Military/Government/Civil watchlist, the
+tar1090-military extract, or your own personal watchlist. This is for
+aircraft that are technically on a watchlist but aren't worth highlighting
+every time, like common local military traffic.
+
+It uses the exact same 12-column layout as `plane-alert-user.csv`, so a
+line can be pasted straight in from any plane-alert-*.csv file (official or
+personal) without reformatting — in practice only the ICAO24 actually
+matters for exclusion itself, and the rest of the columns just carry over
+as reference. The table, add/edit form, Edit/Remove/Enabled controls, and
+BaseStation.sqb display-only lookup for Registration/Type all work exactly
+like the watchlist section described above, and it shares the same
+**Apply** button, which reloads the watchlist and exclude list together.
+
+One consequence of exclusion winning over everything: an excluded aircraft
+is also skipped by the official watchlist's sync into `BaseStation.sqb`
+(see "Your own watchlist" above), since that sync only ever considers what
+ends up in the active watchlist after exclusion is applied. Its
+Registration/Type still populate normally from the live feed like any other
+aircraft — it's simply treated as ordinary, unflagged traffic everywhere
+else in the app too.
 
 ## Legacy archive (optional)
 
@@ -671,16 +705,17 @@ what's nearby versus what's still far out.
 
 ### Admin page (`/admin`)
 
-Manage your own watchlist (see "Your own watchlist" above). Not linked from
-any other page — open it directly by URL. Logged out, it shows just a login
-form and a "Log in to view your watchlist entries" note in place of the
-table — your entries, the eastern-red toggle's current on/off state, and
-the BaseStation.sqb search tool are withheld entirely until you log in with
-the credentials from `dbauth.txt`. Once logged in you can add, edit,
-remove, or enable/disable entries, change that toggle, use the
-BaseStation.sqb search tool, and use the **Apply** button that reloads all
-watchlists for flagging purposes. An entry that's missing Registration/Type
-but matches an aircraft already known in `BaseStation.sqb` shows those values
+Manage your own watchlist and exclude list (see "Your own watchlist" and
+"Excluding aircraft from flagging" above). Not linked from any other page —
+open it directly by URL. Logged out, it shows just a login form and a "Log
+in to view your watchlist entries" note in place of the tables — your
+entries, the eastern-red toggle's current on/off state, and the
+BaseStation.sqb search tool are withheld entirely until you log in with the
+credentials from `dbauth.txt`. Once logged in you can add, edit, remove, or
+enable/disable entries in either list, change that toggle, use the
+BaseStation.sqb search tool, and use the **Apply** button that reloads both
+lists for flagging purposes. An entry that's missing Registration/Type but
+matches an aircraft already known in `BaseStation.sqb` shows those values
 in italics for reference — looked up on the fly, never written into the
 CSV itself. A separate **Database editor** section at the bottom of the
 page lets you add, modify, or delete an entry in `BaseStation.sqb` directly
@@ -720,6 +755,8 @@ All tunable settings live as constants near the top of `modes-logger.py`:
 | `ALERT_MASTER_CSV` | `plane-alert-db.csv` in `ALERTDB_DIR` | The combined Mil/Gov/Civil watchlist, from [plane-alert-db](https://github.com/sdr-enthusiasts/plane-alert-db) |
 | `ALERT_GOV_CSV` / `ALERT_MIL_CSV` | `plane-alert-gov.csv` / `plane-alert-mil.csv` in `ALERTDB_DIR` | Optional fallback watchlist files, loaded after the master CSV (any ICAO24 already loaded from it is skipped) |
 | `ALERT_USER_CSV` | `plane-alert-user.csv` in `ALERTDB_DIR` | Your own watchlist, managed from `/admin` |
+| `ALERT_EXCLUDE_CSV` | `plane-alert-exclude.csv` in `ALERTDB_DIR` | Aircraft never to flag, managed from `/admin` (see "Excluding aircraft from flagging" above) — applied last, after everything else |
+| `ALERT_ENTRY_CSV_FIELDS` | 12 columns | Shared CSV column layout used by both `ALERT_USER_CSV` and `ALERT_EXCLUDE_CSV` |
 | `RUSSIA_ICAO24_MIN` / `RUSSIA_ICAO24_MAX` | `0x100000` / `0x1FFFFF` | Russia's allocated Mode-S address block, used by the "Show flagged eastern planes as red" toggle |
 | `SQUAWK_ALARM_CODES` | `{"7500", "7600", "7700"}` | Squawk values that trigger the Live Flights page's squawk alarm highlight |
 | `DBAUTH_PATH` | `<script dir>/dbauth.txt` | Admin page login credentials (one line, `username:passwd`) |
@@ -751,7 +788,7 @@ This repo intentionally contains only what modes_logger itself needs to run:
 - [`modes-logger.py`](modes-logger.py) — the whole application (poller + Flask web UI)
 - [`templates/`](templates/) — the Jinja templates for the web UI (search form, results table, live flights, admin)
 - [`static/`](static/) — shared front-end assets (currently just the light/dark theme CSS/JS used by all four pages)
-- [`alertdb/`](alertdb/) — the `plane-alert-db.csv` combined watchlist (see Military/Government/Civil watchlist alerts above), the optional `plane-alert-gov.csv`/`plane-alert-mil.csv` fallback files, plus your own `plane-alert-user.csv` (see Your own watchlist above)
+- [`alertdb/`](alertdb/) — the `plane-alert-db.csv` combined watchlist (see Military/Government/Civil watchlist alerts above), the optional `plane-alert-gov.csv`/`plane-alert-mil.csv` fallback files, plus your own `plane-alert-user.csv` (see Your own watchlist above) and `plane-alert-exclude.csv` (see Excluding aircraft from flagging above)
 - `dbauth.txt` — admin page login credentials (not committed — see `.gitignore`; you create this yourself, see Your own watchlist above)
 - `requirements.txt` — the one dependency (Flask)
 - `adsb_data.db`, `BaseStation.sqb`, `admin_settings.json` — local data files, created/updated at runtime (not meant to be committed — see `.gitignore`)
