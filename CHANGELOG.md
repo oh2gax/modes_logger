@@ -4,6 +4,15 @@ All notable changes to this project are documented here, grouped by date
 (newest first). Multiple changes made on the same day are listed together
 under that day's heading.
 
+## 2026-10-02
+
+### Added
+- Results page: a **Filter** field above the table narrows the already-loaded results to matching Registrations or ICAO24s, entirely in the browser with no new search — e.g. typing `OH-LXB` into a whole day's results shows just that aircraft's flights. Case-insensitive, matches any part of the value as you type, supports `*` wildcards like the Search page, and accepts several values separated by commas or spaces. Matching rows are renumbered from 1, and sorting and the `#` "flagged first" toggle keep working on the filtered rows.
+- Results page: a row counter next to "Times in UTC" (e.g. "873 rows displayed"), which shows "N of M rows displayed" while a filter is active.
+
+### Changed
+- Results page: alternating row shading is now kept up to date by the page itself rather than by pure CSS, so stripes stay even when the filter hides rows. The table's scroll area is 22px shorter to make room for the Filter field, keeping the page's overall height the same as before.
+
 ## 2026-09-21
 
 ### Added

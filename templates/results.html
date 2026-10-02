@@ -43,8 +43,37 @@
         }
         .table-wrapper {
             overflow: auto;
-            margin-top: 20px;
-            max-height: calc(100vh - 140px);
+            margin-top: 6px;
+            /* 22px more than before the Filter row existed, so that row
+               doesn't make the page itself any taller. */
+            max-height: calc(100vh - 162px);
+        }
+        /* Client-side Registration/ICAO24 filter above the table's left
+           edge - same look as the Live Flights page's Watch field. */
+        .results-filter {
+            margin-top: 14px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 12px;
+        }
+        #results-filter {
+            font-family: inherit;
+            font-size: 12px;
+            color: var(--text);
+            background-color: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 3px 7px;
+            width: 140px;
+            box-sizing: border-box;
+        }
+        #results-filter:focus {
+            outline: none;
+            border-color: var(--header-bg);
+        }
+        tr.filtered-out {
+            display: none;
         }
         table {
             width: 100%;
@@ -62,7 +91,11 @@
             top: 0;
             z-index: 2;
         }
-        tr:nth-child(even) {
+        /* Alternating row shading is a class (set on even rows by the
+           template, then kept up to date by renumberVisible() below)
+           rather than :nth-child(even), since :nth-child still counts rows
+           hidden by the filter and the stripes would go uneven. */
+        tr.alt-row {
             background-color: var(--row-alt-bg);
         }
         tr.mil-alert {
@@ -86,7 +119,7 @@
             z-index: 1;
             background-color: var(--bg);
         }
-        tr:nth-child(even) .sticky-col {
+        tr.alt-row .sticky-col {
             background-color: var(--row-alt-bg);
         }
         tr.mil-alert .sticky-col {
@@ -134,7 +167,13 @@
     <a href="{{ url_for('home') }}" class="nav-button" title="Open Search page">Search</a>
     <a href="{{ url_for('liveflights') }}" class="nav-button nav-button-2" title="Open Live Flights page">Live</a>
     <h1>MODE-S & ADS-B Query Results</h1>
-    <p class="subtitle">Times in UTC</p>
+    <p class="subtitle">Times in UTC{% if results %}<span id="row-count"> · {{ results|length }} row{{ '' if results|length == 1 else 's' }} displayed</span>{% endif %}</p>
+    {% if results %}
+    <div class="results-filter">
+        <label for="results-filter">Filter:</label>
+        <input type="text" id="results-filter" placeholder="Registration / ICAO24" autocomplete="off" autocapitalize="characters" spellcheck="false">
+    </div>
+    {% endif %}
     <div class="table-wrapper">
     <table>
         <thead>
@@ -164,8 +203,10 @@
         <tbody id="results-tbody">
             {% for row in results %}
             {% set alert = alert_lookup.get(row[0]) %}
-            <tr class="{{ 'mil-alert' if alert == 'mil' else ('gov-alert' if alert == 'gov' else ('civ-alert' if alert == 'civ' else ('eastern-alert' if alert == 'eastern' else ''))) }}"
+            <tr class="{{ 'mil-alert' if alert == 'mil' else ('gov-alert' if alert == 'gov' else ('civ-alert' if alert == 'civ' else ('eastern-alert' if alert == 'eastern' else ''))) }}{{ ' alt-row' if loop.index is even else '' }}"
                 data-flagged="{{ '1' if alert else '0' }}"
+                data-icao="{{ row[0] or '' }}"
+                data-reg="{{ row[1] or '' }}"
                 data-first-epoch="{{ row[19] }}"
                 data-last-epoch="{{ row[20] }}"
                 data-first-altitude="{{ row[7] if row[7] is not none else '' }}"
@@ -270,10 +311,61 @@
             const tbody = document.getElementById('results-tbody');
             const rows = Array.from(tbody.querySelectorAll('tr'));
             const ordered = flaggedFirst ? flaggedFirstOrder(rows) : sortRows(rows, sortState.key, sortState.dir);
-            ordered.forEach((tr, i) => {
-                tr.querySelector('.row-number').textContent = i + 1;
+            ordered.forEach(tr => {
                 tbody.appendChild(tr); // moves the existing row, doesn't clone it
             });
+            renumberVisible();
+        }
+
+        // Row numbers, alternating shading, and the "N rows displayed"
+        // counter all follow just the rows currently visible - so with a
+        // filter active, the matching rows read 1..N with even stripes,
+        // exactly as if they'd been the whole result.
+        function renumberVisible() {
+            const rows = Array.from(document.querySelectorAll('#results-tbody tr'));
+            let n = 0;
+            rows.forEach(tr => {
+                if (tr.classList.contains('filtered-out')) return;
+                n += 1;
+                tr.querySelector('.row-number').textContent = n;
+                tr.classList.toggle('alt-row', n % 2 === 0);
+            });
+            const counter = document.getElementById('row-count');
+            if (counter) {
+                const total = rows.length;
+                const noun = (n === 1 && n === total) ? 'row' : 'rows';
+                counter.textContent = ' · ' + (n === total ? total : n + ' of ' + total) + ' ' + noun + ' displayed';
+            }
+        }
+
+        // Client-side Registration/ICAO24 filter: just hides non-matching
+        // rows already on the page, no new query. Several values can be
+        // given at once, separated by commas or spaces (any one matching is
+        // enough). Each is a case-insensitive "contains" match against
+        // either the Registration or the ICAO24, so the table narrows down
+        // while you type ("LXB" already finds OH-LXB); * works as a
+        // wildcard, the same as on the Search page.
+        function buildFilterPatterns(text) {
+            return text.split(/[\s,]+/).map(s => s.trim()).filter(Boolean).map(tok => {
+                const escaped = tok.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+                return new RegExp(escaped, 'i');
+            });
+        }
+
+        function applyFilter() {
+            const input = document.getElementById('results-filter');
+            const patterns = input ? buildFilterPatterns(input.value) : [];
+            document.querySelectorAll('#results-tbody tr').forEach(tr => {
+                const match = patterns.length === 0 || patterns.some(re =>
+                    re.test(tr.dataset.reg || '') || re.test(tr.dataset.icao || ''));
+                tr.classList.toggle('filtered-out', !match);
+            });
+            renumberVisible();
+        }
+
+        const filterInput = document.getElementById('results-filter');
+        if (filterInput) {
+            filterInput.addEventListener('input', applyFilter);
         }
 
         function updateHeaderIndicators() {
@@ -315,6 +407,9 @@
         });
 
         updateHeaderIndicators();
+        // A browser may restore the filter box's text on Back navigation -
+        // make the table match it rather than showing everything.
+        if (filterInput && filterInput.value) applyFilter();
     </script>
     <script src="{{ url_for('static', filename='theme.js') }}"></script>
 </body>

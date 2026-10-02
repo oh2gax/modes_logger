@@ -564,6 +564,20 @@ other row following below in that same default order. Click `#` again to
 turn it back off; clicking any other sortable column header also cancels it
 and switches to a normal single-column sort instead.
 
+The number of rows the search returned is shown next to "Times in UTC"
+under the page title (e.g. "873 rows displayed"). A **Filter** field above
+the table's left edge narrows the already-loaded results down without
+running a new search — e.g. type `OH-LXB` into a whole day's traffic to see
+just that one aircraft's flights. It matches against both Registration and
+ICAO24, case-insensitively, and narrows the table as you type (any part of
+the value is enough, so `LXB` finds OH-LXB too); `*` works as a wildcard the
+same as on the Search page, and several values can be entered at once,
+separated by commas or spaces, to show any of them. While a filter is
+active, the matching rows are numbered from 1 and the counter reads e.g.
+"3 of 873 rows displayed"; sorting and the `#` "flagged first" toggle work
+on the filtered rows the same way. Clearing the field shows every row
+again.
+
 ### Live Flights page (`/liveflights`)
 
 A matching "Search" button next to its own light/dark toggle jumps back to
