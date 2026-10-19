@@ -2457,4 +2457,8 @@ if __name__ == "__main__":
     Thread(target=fetch_adsb_data, daemon=True).start()
     Thread(target=poll_qnh_data, daemon=True).start()
     Thread(target=poll_regdb_updates, daemon=True).start()
-    app.run(debug=True, host="172.26.1.162", port=5000)
+    # debug stays off on the server: Flask's debug mode exposes an interactive
+    # in-browser debugger on errors, and its auto-reloader runs this whole
+    # script (including the background threads above) in two processes.
+    # Without it, code/template changes take effect after restarting the app.
+    app.run(debug=False, host="172.26.1.162", port=5000)

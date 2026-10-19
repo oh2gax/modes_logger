@@ -494,6 +494,13 @@ github.com), and serves the web UI (by default
 on `172.26.1.162:5000` — edit the `app.run(...)` call at the bottom of
 `modes-logger.py` to change this).
 
+The app runs with Flask's debug mode off, as a single process. Changes to
+`modes-logger.py` or the templates therefore take effect only after a
+restart: stop the running process (e.g. find it with `ps -ef | grep
+modes-logger` and `kill` its PID) and start `python3 modes-logger.py` again.
+Errors show a plain "Internal Server Error" page in the browser; the details
+go to the terminal output.
+
 Open the site in a browser to use the three pages described below.
 
 ## Web UI
