@@ -45,6 +45,11 @@ At a glance, modes_logger currently gives you:
   already know a plane's details before it's ever come through the live
   feed. Every change is confirmed before it's made, since it edits a shared
   database other ADS-B tools may also read.
+- **Automatic registration backfill** — registrations and aircraft types the
+  live feed doesn't resolve (common e.g. for Chinese aircraft) are filled in
+  from a daily-updated local copy of the tar1090-db aircraft database, both
+  for aircraft already logged and for new ones as they appear. Only empty
+  fields are filled; existing values are never changed.
 - **An optional read-only legacy archive** — drop in an older
   BaseStation-format database covering years before `adsb_data.db` started,
   and matching historical flights are automatically pulled into your
@@ -302,6 +307,71 @@ Registration/Type still populate normally from the live feed like any other
 aircraft — it's simply treated as ordinary, unflagged traffic everywhere
 else in the app too.
 
+## Registration backfill (tar1090-db)
+
+The receiver's JSON feed doesn't know every aircraft's registration — many
+Chinese ICAO24s, newly delivered aircraft and some military/state aircraft
+come through with only their ICAO24. To fill those gaps, modes_logger keeps
+a local copy of the [tar1090-db](https://github.com/wiedehopf/tar1090-db)
+aircraft database (built from the Mictronics database — the same one most
+readsb/tar1090 setups use, around 570,000 aircraft) and uses it to complete
+`BaseStation.sqb`:
+
+- **Daily update** — every day at 04:30 UTC (shortly after upstream
+  publishes its daily update), and shortly after startup if the data is
+  missing or more than a day old. The check is a conditional download: on a
+  day with no upstream change it's a single tiny "not modified" request, and
+  otherwise one ~8 MB download. The data is stored in its own indexed SQLite
+  file, `tar1090-aircraft.db`, next to `modes-logger.py`, so lookups are
+  instant and the database never sits in memory. A failed or obviously
+  incomplete download is ignored and the previous day's data stays in use.
+- **Batch backfill** — after each update, every aircraft ever logged in
+  `adsb_data.db` gets any still-empty Registration or ICAO type filled in
+  from tar1090-db. `BaseStation.sqb` doesn't become a copy of the whole
+  database: aircraft that have never been logged are left out.
+- **Live fallback** — when the live feed reports an aircraft without a
+  registration or type, the local copy is checked right away, so e.g. a new
+  Chinese aircraft shows its B- registration on the Live Flights page the
+  first time it appears, not only after the next nightly run. Each aircraft
+  is looked up at most once per day.
+
+Only empty fields are ever filled — an existing Registration or ICAO type,
+whether it came from the live feed or was entered by hand, is never
+overwritten. Where an existing registration differs from tar1090-db's (for
+example a re-registered aircraft, or a military aircraft one source lists by
+serial number), the aircraft is listed on the admin page instead, for you to
+decide. Since the Results, Live Flights and Search pages all read
+`BaseStation.sqb`, filled-in registrations show up everywhere, including in
+Registration searches.
+
+The admin page's **Registration backfill** section shows when the data was
+last downloaded and how many aircraft it contains, what the last backfill
+filled in, how many logged aircraft still have no registration, and any
+error from the last update. **Update now** runs the whole update
+immediately in the background; while it runs, the page refreshes itself
+automatically as soon as it's done. Under it, **Registrations that differ from
+tar1090-db** lists every disagreement (your value, tar1090-db's value).
+Nothing changes until you choose: tick aircraft (or click their rows; the
+header box selects all) and use one of the two batch buttons:
+
+- **Use tar1090-db value** sets the registration of every ticked aircraft
+  in `BaseStation.sqb` to tar1090-db's value (after a confirmation; the
+  ICAO type is left as it is).
+- **Keep BaseStation.sqb value** leaves `BaseStation.sqb` untouched and
+  hides the ticked aircraft from the list — e.g. when tar1090-db's value is
+  the one that's wrong. A kept aircraft only stays hidden while tar1090-db
+  keeps the value you reviewed; if tar1090-db's value changes later, it's
+  listed again for a new look. **Show again** under the list brings back
+  every kept one.
+
+For a single aircraft, **Edit** loads tar1090-db's registration into the
+Database editor instead, for a manual correction. Fixed entries drop off the
+list right away, and the list stays open after each action so a long list
+can be worked through in steps.
+Aircraft that tar1090-db doesn't know either (typically small local general
+aviation, or garbled ICAO24s from decoding errors) stay without a
+registration and can be added by hand with the Database editor.
+
 ## Legacy archive (optional)
 
 If you've been logging for a long time and have an older BaseStation-format
@@ -418,7 +488,9 @@ python3 modes-logger.py
 ```
 
 This creates/migrates `adsb_data.db` and `BaseStation.sqb` as needed, starts
-the background poller in a daemon thread, and serves the web UI (by default
+the background pollers in daemon threads (live feed, QNH, and the daily
+registration database update — which needs outbound HTTPS access to
+github.com), and serves the web UI (by default
 on `172.26.1.162:5000` — edit the `app.run(...)` call at the bottom of
 `modes-logger.py` to change this).
 
@@ -731,7 +803,10 @@ in italics for reference — looked up on the fly, never written into the
 CSV itself. A separate **Database editor** section at the bottom of the
 page lets you add, modify, or delete an entry in `BaseStation.sqb` directly
 (ICAO24, Registration, ICAO Type) — each change confirmed before it's made
-and applied immediately, no Apply step needed.
+and applied immediately, no Apply step needed. Below it, the **Registration
+backfill** section shows the status of the daily tar1090-db update, has an
+**Update now** button, and lists registrations that differ from tar1090-db
+(see "Registration backfill (tar1090-db)" above).
 
 ### Light/dark mode
 
@@ -778,6 +853,12 @@ All tunable settings live as constants near the top of `modes-logger.py`:
 | `QNH_MAX_AGE_SECONDS` | `7200` (2 hours) | How old the last successfully-fetched QNH can be before altitude correction reports "timeout" |
 | `QNH_MIN_HPA` / `QNH_MAX_HPA` | `850` / `1085` | Sanity bounds a parsed QNH must fall within to be accepted |
 | `TRANSITION_ALTITUDE_FT` | `5000` | Altitude at/above which no QNH correction is applied (matches the flight-level cutoff used for display, both server- and client-side) |
+| `TAR1090_DB_URL` | tar1090-db `aircraft.csv.gz` on GitHub | Source of the registration backfill data (see "Registration backfill (tar1090-db)" above) |
+| `REGDB_PATH` | `<script dir>/tar1090-aircraft.db` | Local indexed copy of tar1090-db, plus the backfill's status and conflict list |
+| `REGDB_UPDATE_HOUR_UTC` / `REGDB_UPDATE_MINUTE_UTC` | `4` / `30` | Daily time (UTC) of the update check and backfill |
+| `REGDB_STARTUP_DELAY_SECONDS` | `60` | Delay before the catch-up update after startup (only when the data is missing or over a day old) |
+| `REGDB_FETCH_TIMEOUT_SECONDS` | `120` | Timeout for the download |
+| `REGDB_MIN_ENTRIES` | `100000` | A download with fewer usable entries is treated as broken and the previous data is kept |
 
 ## Database schema
 
@@ -801,7 +882,7 @@ This repo intentionally contains only what modes_logger itself needs to run:
 - [`alertdb/`](alertdb/) — the `plane-alert-db.csv` combined watchlist and optional `tar1090-military.csv` extract (see Military/Government/Civil watchlist alerts above), plus your own `plane-alert-user.csv` (see Your own watchlist above) and `plane-alert-exclude.csv` (see Excluding aircraft from flagging above)
 - `dbauth.txt` — admin page login credentials (not committed — see `.gitignore`; you create this yourself, see Your own watchlist above)
 - `requirements.txt` — the one dependency (Flask)
-- `adsb_data.db`, `BaseStation.sqb`, `admin_settings.json` — local data files, created/updated at runtime (not meant to be committed — see `.gitignore`)
+- `adsb_data.db`, `BaseStation.sqb`, `admin_settings.json`, `tar1090-aircraft.db` — local data files, created/updated at runtime (not meant to be committed — see `.gitignore`)
 - `BaseStation-legacy-2023.sqb` — optional, read-only legacy archive (see "Legacy archive" above); not committed, same `*.sqb` `.gitignore` rule as `BaseStation.sqb`
 
 The JSON relay that feeds port 31009 and any registration-lookup helper
@@ -826,7 +907,8 @@ The Military/Government/Civil watchlist CSV used in `alertdb/` (see
 Thanks to its maintainers and contributors for compiling and maintaining
 that data.
 
-The optional `tar1090-military.csv` source is derived from the
+The registration backfill data and the optional `tar1090-military.csv`
+source both come from the
 [tar1090-db / Mictronics](https://github.com/wiedehopf/tar1090-db) aircraft
 database (maintained at [mictronics.de](https://www.mictronics.de/aircraft-database/)),
 the standard hex → registration/type database used by most dump1090/readsb/

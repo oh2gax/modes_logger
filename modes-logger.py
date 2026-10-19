@@ -1,7 +1,11 @@
 import csv
+import gzip
+import hashlib
 import hmac
+import io
 import json
 import os
+import pathlib
 import re
 import secrets
 import socket
@@ -191,6 +195,27 @@ QNH_MIN_HPA = 850                    # sanity bounds - reject obviously bogus pa
 QNH_MAX_HPA = 1085
 TRANSITION_ALTITUDE_FT = 5000        # matches liveflights.html's own FL/ft cutoff
 
+# Registration backfill: the live JSON feed doesn't resolve every aircraft's
+# registration/type (e.g. many Chinese ICAO24s), so a local copy of the
+# tar1090-db aircraft database (github.com/wiedehopf/tar1090-db, built from
+# the Mictronics database - the same one most readsb/tar1090 setups use) is
+# downloaded once a day and used to fill in BaseStation.sqb fields that are
+# still blank. Blank fields only: an existing Registration/ICAOTypeCode is
+# never overwritten - where the two disagree it's listed on the /admin page
+# instead, for a human to decide. The download is a conditional GET (ETag),
+# so a day with no upstream change costs one tiny "304 Not Modified"
+# request. The data goes into its own small SQLite file (REGDB_PATH, an
+# indexed lookup table) rather than into memory, so lookups are instant and
+# the ~600k-entry database never sits in RAM. See update_regdb.
+TAR1090_DB_URL = "https://github.com/wiedehopf/tar1090-db/raw/refs/heads/csv/aircraft.csv.gz"
+REGDB_PATH = os.path.join(BASE_DIR, "tar1090-aircraft.db")
+REGDB_UPDATE_HOUR_UTC = 4            # upstream normally publishes ~04:00 UTC,
+REGDB_UPDATE_MINUTE_UTC = 30         # so check daily at 04:30 UTC
+REGDB_STARTUP_DELAY_SECONDS = 60     # first check after startup, if data is missing/stale
+REGDB_FETCH_TIMEOUT_SECONDS = 120
+REGDB_MIN_ENTRIES = 100000           # sanity check - a smaller download is treated as broken
+                                     # and the previous data is kept
+
 # ---------------- Shared in-memory state ----------------
 # ALERT_DB: ICAO24 -> {"source": "official"/"user", "cmpg": "mil"/"gov"/"civ",
 # "registration":, "operator":, "type":}. "source" is the trust axis (does
@@ -223,6 +248,16 @@ LIVE_SNAPSHOT_LOCK = threading.Lock()
 # the previous value in place until it ages past QNH_MAX_AGE_SECONDS.
 QNH_STATE = {"hpa": None, "fetched_at_epoch": None, "updated_utc": None}
 QNH_LOCK = threading.Lock()
+
+# Registration backfill (see update_regdb): REGDB_UPDATE_LOCK makes sure only
+# one update runs at a time (daily schedule vs. the admin page's "Update
+# now"). REGDB_LIVE_CHECKED holds the ICAO24s the live feed has already
+# looked up in REGDB_PATH since the last update, so an aircraft the feed
+# keeps reporting without a registration costs one lookup, not one every
+# poll; it's cleared after each update so newly-arrived data gets a chance.
+REGDB_UPDATE_LOCK = threading.Lock()
+REGDB_LIVE_CHECKED = set()
+REGDB_LIVE_CHECKED_LOCK = threading.Lock()
 
 # ---------------- Helpers ----------------
 def now_pair():
@@ -836,6 +871,404 @@ def get_qnh_status():
         return {"hpa": hpa, "status": "timeout", "updated_utc": updated_utc}
     return {"hpa": hpa, "status": "in_use", "updated_utc": updated_utc}
 
+# ---------------- Registration backfill (tar1090-db) ----------------
+HEX6_RE = re.compile(r"^[0-9A-F]{6}$")
+
+def utc_stamp():
+    return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+
+def regdb_connect(timeout=5):
+    """Open REGDB_PATH for writing, creating its tables on first use.
+    Tables: aircraft (the tar1090-db lookup itself), meta (download/backfill
+    status shown on /admin, as key/value text), conflicts (logged aircraft
+    whose BaseStation.sqb registration differs from tar1090-db's), dismissed
+    (conflicts the admin chose "keep my value" for, remembered together with
+    the tar1090-db value they were reviewed against - see
+    keep_regdb_conflicts)."""
+    conn = sqlite3.connect(REGDB_PATH, timeout=timeout)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("CREATE TABLE IF NOT EXISTS aircraft "
+                 "(icao TEXT PRIMARY KEY, reg TEXT, type TEXT) WITHOUT ROWID")
+    conn.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
+    conn.execute("CREATE TABLE IF NOT EXISTS conflicts "
+                 "(icao TEXT PRIMARY KEY, ours TEXT, theirs TEXT, ours_type TEXT, theirs_type TEXT)")
+    conn.execute("CREATE TABLE IF NOT EXISTS dismissed (icao TEXT PRIMARY KEY, theirs TEXT)")
+    conn.commit()
+    return conn
+
+def regdb_connect_readonly():
+    """Read-only connection to REGDB_PATH, or None if it doesn't exist yet
+    (never creates the file - only regdb_connect does that)."""
+    if not os.path.exists(REGDB_PATH):
+        return None
+    return sqlite3.connect(pathlib.Path(REGDB_PATH).as_uri() + "?mode=ro", uri=True)
+
+def regdb_read_meta(conn):
+    return dict(conn.execute("SELECT key, value FROM meta").fetchall())
+
+def regdb_write_meta(conn, **values):
+    conn.executemany(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+        [(k, "" if v is None else str(v)) for k, v in values.items()],
+    )
+
+def download_tar1090_db(etag):
+    """Conditional download of aircraft.csv.gz. Returns (gz_bytes, etag), or
+    (None, etag) when upstream answers 304 Not Modified. Raises on any other
+    failure. ~8 MB, kept in memory only for as long as the rebuild takes."""
+    headers = {"User-Agent": "modes_logger/1.0 (daily registration backfill)"}
+    if etag:
+        headers["If-None-Match"] = etag
+    req = urllib.request.Request(TAR1090_DB_URL, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=REGDB_FETCH_TIMEOUT_SECONDS) as resp:
+            return resp.read(), resp.headers.get("ETag") or ""
+    except urllib.error.HTTPError as e:
+        if e.code == 304:
+            return None, etag
+        raise
+
+def iter_tar1090_rows(gz_bytes):
+    """Yield (icao24, registration, icao_type) from aircraft.csv.gz, one line
+    at a time (format "icao;reg;type;flags;description;..."). Skips lines
+    without a valid 6-hex-digit ICAO24 (e.g. non-ICAO "~" addresses) and
+    entries with neither a registration nor a type."""
+    with gzip.GzipFile(fileobj=io.BytesIO(gz_bytes)) as gz:
+        for line in io.TextIOWrapper(gz, encoding="utf-8", errors="replace"):
+            parts = line.rstrip("\r\n").split(";")
+            if len(parts) < 3:
+                continue
+            icao = parts[0].strip().upper()
+            if not HEX6_RE.match(icao):
+                continue
+            reg = parts[1].strip()
+            actype = parts[2].strip()
+            if reg or actype:
+                yield icao, reg, actype
+
+def rebuild_regdb(conn, gz_bytes, etag, sha256):
+    """Replace the aircraft lookup table with a fresh download, in a single
+    transaction - pages reading the old data keep working until the commit,
+    and a download that turns out to be broken (fewer than
+    REGDB_MIN_ENTRIES usable rows) is rolled back, leaving yesterday's data
+    in place. Returns the number of entries, or None if this exact file was
+    already loaded (e.g. by another process that got there first)."""
+    count = 0
+
+    def counted():
+        nonlocal count
+        for row in iter_tar1090_rows(gz_bytes):
+            count += 1
+            yield row
+
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        if regdb_read_meta(conn).get("sha256") == sha256:
+            conn.rollback()
+            return None
+        conn.execute("DELETE FROM aircraft")
+        conn.executemany("INSERT OR REPLACE INTO aircraft (icao, reg, type) VALUES (?, ?, ?)", counted())
+        if count < REGDB_MIN_ENTRIES:
+            raise ValueError(f"only {count} usable entries in download - keeping previous data")
+        regdb_write_meta(conn, etag=etag, sha256=sha256, entries=count, downloaded_utc=utc_stamp())
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return count
+
+def fill_basestation_blanks(cur_base, icao24, existing, registration, actype):
+    """Write registration/actype into BaseStation.sqb only where that field
+    is currently blank. existing is the current (Registration, ICAOTypeCode)
+    row, or None if the aircraft has no row yet. Unlike
+    upsert_basestation_registration (the live feed's own writer), this never
+    replaces a value that's already there. Returns (reg_filled, type_filled)."""
+    cur_reg = (existing[0] or "").strip() if existing else ""
+    cur_type = (existing[1] or "").strip() if existing else ""
+    reg_filled = bool(registration) and not cur_reg
+    type_filled = bool(actype) and not cur_type
+    if not (reg_filled or type_filled):
+        return False, False
+    if existing is None:
+        cur_base.execute(
+            "INSERT INTO Aircraft (ModeS, Registration, ICAOTypeCode) VALUES (?, ?, ?)",
+            (icao24, registration if reg_filled else "", actype if type_filled else ""),
+        )
+    else:
+        if reg_filled:
+            cur_base.execute("UPDATE Aircraft SET Registration = ? WHERE ModeS = ?", (registration, icao24))
+        if type_filled:
+            cur_base.execute("UPDATE Aircraft SET ICAOTypeCode = ? WHERE ModeS = ?", (actype, icao24))
+    return reg_filled, type_filled
+
+def normalize_registration(value):
+    """For comparison only: "OH-LXB", "oh-lxb" and "OHLXB" count as equal."""
+    return re.sub(r"[\s-]", "", (value or "").upper())
+
+def backfill_basestation_from_regdb(conn_reg):
+    """Batch pass over every aircraft ever logged in adsb_data.db: fill any
+    blank Registration/ICAOTypeCode in BaseStation.sqb from the tar1090-db
+    lookup (blanks only), and record where an existing registration
+    disagrees with tar1090-db (listed on /admin, never auto-changed).
+    Only logged aircraft are touched - BaseStation.sqb doesn't become a copy
+    of the whole tar1090 database. Returns a summary dict."""
+    conn_main = sqlite3.connect(DB_NAME, timeout=30)
+    try:
+        logged = sorted({(r[0] or "").strip().upper()
+                         for r in conn_main.execute("SELECT DISTINCT ICAO24 FROM aircraft")} - {""})
+    finally:
+        conn_main.close()
+
+    regs_filled = types_filled = still_unknown = 0
+    conflicts = []
+    conn_base = sqlite3.connect(SQB_DB_PATH, timeout=30)
+    try:
+        cur_base = conn_base.cursor()
+        cur_reg = conn_reg.cursor()
+        for icao in logged:
+            cur_reg.execute("SELECT reg, type FROM aircraft WHERE icao = ?", (icao,))
+            theirs = cur_reg.fetchone()
+            their_reg = (theirs[0] or "").strip() if theirs else ""
+            their_type = (theirs[1] or "").strip() if theirs else ""
+            cur_base.execute("SELECT Registration, ICAOTypeCode FROM Aircraft WHERE ModeS = ?", (icao,))
+            existing = cur_base.fetchone()
+            our_reg = (existing[0] or "").strip() if existing else ""
+            our_type = (existing[1] or "").strip() if existing else ""
+
+            reg_filled, type_filled = fill_basestation_blanks(cur_base, icao, existing, their_reg, their_type)
+            regs_filled += reg_filled
+            types_filled += type_filled
+            if not our_reg and not reg_filled:
+                still_unknown += 1
+            if our_reg and their_reg and normalize_registration(our_reg) != normalize_registration(their_reg):
+                conflicts.append((icao, our_reg, their_reg, our_type, their_type))
+        conn_base.commit()
+    except Exception:
+        conn_base.rollback()
+        raise
+    finally:
+        conn_base.close()
+
+    conn_reg.execute("DELETE FROM conflicts")
+    conn_reg.executemany(
+        "INSERT OR REPLACE INTO conflicts (icao, ours, theirs, ours_type, theirs_type) VALUES (?, ?, ?, ?, ?)",
+        conflicts,
+    )
+    summary = {"backfill_utc": utc_stamp(), "backfill_logged": len(logged),
+               "backfill_regs": regs_filled, "backfill_types": types_filled,
+               "backfill_unknown": still_unknown}
+    regdb_write_meta(conn_reg, **summary)
+    conn_reg.commit()
+    return summary
+
+def update_regdb():
+    """One full update: conditional download (rebuilding the lookup only if
+    upstream changed), then the BaseStation.sqb backfill - which runs even
+    on a "no change" day, since new aircraft get logged every day. A failed
+    download is recorded for /admin and the backfill still runs on the data
+    already there. Only one update runs at a time; returns False if one was
+    already in progress."""
+    if not REGDB_UPDATE_LOCK.acquire(blocking=False):
+        return False
+    try:
+        conn = regdb_connect(timeout=60)
+        try:
+            meta = regdb_read_meta(conn)
+            has_data = conn.execute("SELECT 1 FROM aircraft LIMIT 1").fetchone() is not None
+            try:
+                # Without any data yet, ask for the file unconditionally.
+                gz_bytes, etag = download_tar1090_db(meta.get("etag") if has_data else None)
+                if gz_bytes is not None:
+                    count = rebuild_regdb(conn, gz_bytes, etag, hashlib.sha256(gz_bytes).hexdigest())
+                    if count is not None:
+                        print(f"Registration DB: loaded {count} aircraft from tar1090-db")
+                regdb_write_meta(conn, checked_utc=utc_stamp(), checked_epoch=int(time.time()), error="")
+                conn.commit()
+            except Exception as e:
+                print(f"Registration DB: update from tar1090-db failed: {e}")
+                regdb_write_meta(conn, error=f"{utc_stamp()}: {e}")
+                conn.commit()
+
+            if conn.execute("SELECT 1 FROM aircraft LIMIT 1").fetchone() is not None:
+                summary = backfill_basestation_from_regdb(conn)
+                print(f"Registration DB: backfill filled {summary['backfill_regs']} registrations, "
+                      f"{summary['backfill_types']} types; {summary['backfill_unknown']} logged "
+                      f"aircraft still without registration")
+        finally:
+            conn.close()
+        with REGDB_LIVE_CHECKED_LOCK:
+            REGDB_LIVE_CHECKED.clear()
+        return True
+    finally:
+        REGDB_UPDATE_LOCK.release()
+
+def run_regdb_update():
+    """update_regdb() for background threads - never lets an error escape."""
+    try:
+        update_regdb()
+    except Exception as e:
+        print(f"Registration DB: update error: {e}")
+
+def regdb_needs_update():
+    """True if there's no data yet or the last successful check is over a
+    day old - used at startup, so a fresh install or a server that was down
+    over 04:30 UTC doesn't wait until the next scheduled run."""
+    conn = regdb_connect_readonly()
+    if conn is None:
+        return True
+    try:
+        checked = int(regdb_read_meta(conn).get("checked_epoch") or 0)
+        has_data = conn.execute("SELECT 1 FROM aircraft LIMIT 1").fetchone() is not None
+    except (sqlite3.Error, ValueError):
+        return True
+    finally:
+        conn.close()
+    return not has_data or time.time() - checked > 24 * 3600
+
+def seconds_until_next_regdb_run(now=None):
+    now = now or datetime.utcnow()
+    target = now.replace(hour=REGDB_UPDATE_HOUR_UTC, minute=REGDB_UPDATE_MINUTE_UTC, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
+
+def poll_regdb_updates():
+    """Background loop: catch up shortly after startup if needed, then run
+    update_regdb() once a day at REGDB_UPDATE_HOUR_UTC:REGDB_UPDATE_MINUTE_UTC."""
+    time.sleep(REGDB_STARTUP_DELAY_SECONDS)
+    if regdb_needs_update():
+        run_regdb_update()
+    while True:
+        time.sleep(seconds_until_next_regdb_run())
+        run_regdb_update()
+
+def regdb_live_fill(cur_base, conn_reg, icao24):
+    """Live-feed fallback, called from process_aircraft_list when the feed
+    reports an aircraft without a registration or type: fill whatever
+    BaseStation.sqb is still missing from the local tar1090-db lookup, so
+    e.g. a new Chinese aircraft shows its B-number on the Live Flights page
+    the first time it appears, not only after the nightly batch. Each
+    ICAO24 is looked up at most once between updates (REGDB_LIVE_CHECKED).
+    A problem with the lookup file is never allowed to disturb logging."""
+    with REGDB_LIVE_CHECKED_LOCK:
+        if icao24 in REGDB_LIVE_CHECKED:
+            return
+        REGDB_LIVE_CHECKED.add(icao24)
+    cur_base.execute("SELECT Registration, ICAOTypeCode FROM Aircraft WHERE ModeS = ?", (icao24,))
+    existing = cur_base.fetchone()
+    if existing and (existing[0] or "").strip() and (existing[1] or "").strip():
+        return
+    try:
+        row = conn_reg.execute("SELECT reg, type FROM aircraft WHERE icao = ?", (icao24,)).fetchone()
+    except sqlite3.Error:
+        return
+    if row:
+        fill_basestation_blanks(cur_base, icao24, existing, (row[0] or "").strip(), (row[1] or "").strip())
+
+def get_regdb_status():
+    """Everything the /admin page shows about the registration backfill.
+    Conflicts are re-checked against BaseStation.sqb's current values, so
+    one already fixed through the Database editor drops off immediately
+    instead of lingering until the next nightly run. Conflicts the admin
+    chose to keep are left out (and counted in "hidden") as long as
+    tar1090-db still has the same value they were reviewed against."""
+    status = {"running": REGDB_UPDATE_LOCK.locked(), "meta": {}, "conflicts": [], "hidden": 0}
+    conn = regdb_connect_readonly()
+    if conn is None:
+        return status
+    try:
+        status["meta"] = regdb_read_meta(conn)
+        stored = conn.execute(
+            "SELECT icao, ours, theirs, ours_type, theirs_type FROM conflicts ORDER BY icao").fetchall()
+        try:
+            dismissed = dict(conn.execute("SELECT icao, theirs FROM dismissed").fetchall())
+        except sqlite3.Error:
+            dismissed = {}  # file from before this table existed
+    except sqlite3.Error:
+        return status
+    finally:
+        conn.close()
+
+    conn_base = sqlite3.connect(SQB_DB_PATH)
+    try:
+        cur_base = conn_base.cursor()
+        for icao, ours, theirs, ours_type, theirs_type in stored:
+            cur_base.execute("SELECT Registration, ICAOTypeCode FROM Aircraft WHERE ModeS = ?", (icao,))
+            current = cur_base.fetchone()
+            current_reg = (current[0] or "").strip() if current else ""
+            if not current_reg or normalize_registration(current_reg) == normalize_registration(theirs):
+                continue
+            if icao in dismissed and normalize_registration(dismissed[icao]) == normalize_registration(theirs):
+                status["hidden"] += 1
+                continue
+            status["conflicts"].append({
+                "icao": icao, "ours": current_reg, "theirs": theirs,
+                "type": ((current[1] or "").strip() if current else "") or theirs_type or "",
+            })
+    finally:
+        conn_base.close()
+    return status
+
+def stored_regdb_conflicts(conn_reg, icaos):
+    """{icao: tar1090-db registration} from the stored conflict list, for the
+    given ICAO24s - i.e. exactly the values the admin page displayed."""
+    result = {}
+    for i in range(0, len(icaos), 500):
+        chunk = icaos[i:i + 500]
+        placeholders = ",".join("?" for _ in chunk)
+        result.update(conn_reg.execute(
+            f"SELECT icao, theirs FROM conflicts WHERE icao IN ({placeholders})", chunk).fetchall())
+    return result
+
+def apply_regdb_conflicts(icaos):
+    """Admin batch action "use tar1090-db value": set each selected
+    aircraft's BaseStation.sqb Registration to the tar1090-db value shown in
+    the conflict list (its ICAO type is left alone). Returns how many were
+    updated."""
+    conn_reg = regdb_connect(timeout=30)
+    try:
+        theirs_by_icao = stored_regdb_conflicts(conn_reg, icaos)
+    finally:
+        conn_reg.close()
+    updated = 0
+    conn_base = sqlite3.connect(SQB_DB_PATH, timeout=30)
+    try:
+        for icao in icaos:
+            theirs = (theirs_by_icao.get(icao) or "").strip()
+            if theirs:
+                updated += conn_base.execute(
+                    "UPDATE Aircraft SET Registration = ? WHERE ModeS = ?", (theirs, icao)).rowcount
+        conn_base.commit()
+    finally:
+        conn_base.close()
+    return updated
+
+def keep_regdb_conflicts(icaos):
+    """Admin batch action "keep my value": hide the selected conflicts from
+    the list. Remembered together with tar1090-db's value at the time, so if
+    tar1090-db later changes its value for that aircraft, it shows up for
+    review again. BaseStation.sqb itself isn't touched. Returns how many."""
+    conn_reg = regdb_connect(timeout=30)
+    try:
+        theirs_by_icao = stored_regdb_conflicts(conn_reg, icaos)
+        conn_reg.executemany("INSERT OR REPLACE INTO dismissed (icao, theirs) VALUES (?, ?)",
+                             list(theirs_by_icao.items()))
+        conn_reg.commit()
+    finally:
+        conn_reg.close()
+    return len(theirs_by_icao)
+
+def unhide_regdb_conflicts():
+    """Admin action: forget every "keep my value" decision, so all current
+    conflicts are listed again. Returns how many decisions were cleared."""
+    conn_reg = regdb_connect(timeout=30)
+    try:
+        cleared = conn_reg.execute("DELETE FROM dismissed").rowcount
+        conn_reg.commit()
+    finally:
+        conn_reg.close()
+    return cleared
+
 def upsert_basestation_registration(conn, icao24, registration, actype):
     """Insert/update Registration + ICAOTypeCode in BaseStation.sqb from the
     live JSON feed. Only writes when something is actually new or different,
@@ -897,6 +1330,7 @@ def process_aircraft_list(aircraft_list):
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
     conn_base = sqlite3.connect(SQB_DB_PATH)
+    conn_reg = None  # tar1090-db lookup, opened only if some aircraft needs it
     fallback_str, fallback_epoch = now_pair()
     snapshot = {}  # this poll's aircraft, for the live flights page - see LIVE_SNAPSHOT
 
@@ -944,6 +1378,16 @@ def process_aircraft_list(aircraft_list):
             # Keep BaseStation.sqb in sync with whatever registration/type
             # the receiver reports for this aircraft
             upsert_basestation_registration(conn_base, icao24, registration, actype)
+            # ...and when the feed doesn't know it, try the local tar1090-db
+            # copy for whatever BaseStation.sqb is still missing.
+            if not registration or not actype:
+                if conn_reg is None:
+                    try:
+                        conn_reg = regdb_connect_readonly() or False
+                    except sqlite3.Error:
+                        conn_reg = False
+                if conn_reg:
+                    regdb_live_fill(conn_base.cursor(), conn_reg, icao24)
 
             # Get or create pointer
             cur.execute("SELECT record_id, last_epoch, first_epoch FROM current_flights WHERE ICAO24=?", (icao24,))
@@ -1033,6 +1477,8 @@ def process_aircraft_list(aircraft_list):
     finally:
         conn.close()
         conn_base.close()
+        if conn_reg:
+            conn_reg.close()
         # Publish this poll's snapshot for the live flights page, win or
         # lose on the DB writes above - it's independent, in-memory state.
         with LIVE_SNAPSHOT_LOCK:
@@ -1735,8 +2181,10 @@ def admin():
     rows = []
     exclude_rows = []
     eastern_red_enabled = None
+    regdb_status = None
 
     if logged_in:
+        regdb_status = get_regdb_status()
         entries = read_csv_entries(ALERT_USER_CSV)
         exclude_entries = read_csv_entries(ALERT_EXCLUDE_CSV)
         eastern_red_enabled = read_eastern_red_enabled()
@@ -1782,7 +2230,61 @@ def admin():
         cmpg_display_labels=CMPG_DISPLAY_LABELS,
         db_query=db_query,
         db_results=db_results,
+        regdb_status=regdb_status,
+        regdb_open=bool(request.args.get("regdb_open")),
     )
+
+@app.route("/admin/regdb_update", methods=["POST"])
+@login_required
+def admin_regdb_update():
+    """Admin page's "Update now" for the registration backfill. Runs in the
+    background (the download and rebuild can take tens of seconds), so the
+    page returns at once and shows "update running" until it's done - the
+    page then polls admin_regdb_status and reloads itself when it finishes."""
+    if REGDB_UPDATE_LOCK.locked():
+        flash("A registration database update is already running.")
+    else:
+        threading.Thread(target=run_regdb_update, daemon=True).start()
+        flash("Registration database update started - this page refreshes automatically when it's done.")
+    return redirect(url_for("admin") + "#regdb")
+
+@app.route("/admin/regdb_conflicts", methods=["POST"])
+@login_required
+def admin_regdb_conflicts():
+    """Batch actions on the "Registrations that differ from tar1090-db"
+    list: action=apply (use tar1090-db's value for the ticked aircraft),
+    action=keep (keep BaseStation.sqb's value, hide them from the list), or
+    action=unhide (list every previously kept one again). Returns to the
+    admin page with the list left open, for working through it in steps."""
+    action = request.form.get("action", "")
+    icaos = []
+    for value in request.form.getlist("icao"):
+        icao = value.strip().upper()
+        if HEX6_RE.match(icao) and icao not in icaos:
+            icaos.append(icao)
+
+    if action == "unhide":
+        n = unhide_regdb_conflicts()
+        flash(f"{n} kept registration{'' if n == 1 else 's'} listed again.")
+    elif not icaos:
+        flash("No aircraft selected - tick the ones to update first.")
+    elif action == "apply":
+        n = apply_regdb_conflicts(icaos)
+        flash(f"Updated {n} registration{'' if n == 1 else 's'} in BaseStation.sqb to tar1090-db's value.")
+    elif action == "keep":
+        n = keep_regdb_conflicts(icaos)
+        flash(f"Kept {n} BaseStation.sqb registration{'' if n == 1 else 's'} as they are - "
+              f"hidden from the list unless tar1090-db's value changes.")
+    else:
+        flash("Unknown action.")
+    return redirect(url_for("admin", regdb_open=1) + "#regdb")
+
+@app.route("/admin/regdb_status")
+@login_required
+def admin_regdb_status():
+    """Tiny JSON status for the admin page's auto-refresh while an update
+    is running - just whether it's still going, nothing else."""
+    return jsonify({"running": REGDB_UPDATE_LOCK.locked()})
 
 @app.route("/admin/login", methods=["POST"])
 def admin_login():
@@ -1954,4 +2456,5 @@ if __name__ == "__main__":
     from threading import Thread
     Thread(target=fetch_adsb_data, daemon=True).start()
     Thread(target=poll_qnh_data, daemon=True).start()
+    Thread(target=poll_regdb_updates, daemon=True).start()
     app.run(debug=True, host="172.26.1.162", port=5000)

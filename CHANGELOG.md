@@ -4,6 +4,13 @@ All notable changes to this project are documented here, grouped by date
 (newest first). Multiple changes made on the same day are listed together
 under that day's heading.
 
+## 2026-10-19
+
+### Added
+- Registration backfill from tar1090-db: a local copy of the [tar1090-db](https://github.com/wiedehopf/tar1090-db) aircraft database (Mictronics-based, ~570,000 aircraft) is downloaded daily at 04:30 UTC — as a conditional download, so a day without upstream changes costs one small "not modified" request — and stored as an indexed lookup in a new runtime file, `tar1090-aircraft.db`. After each update, every logged aircraft gets any still-empty Registration or ICAO type filled into `BaseStation.sqb`, and the live feed uses the same lookup straight away for aircraft it reports without a registration (once per aircraft per day). Existing values are never overwritten. Tested against a copy of the real databases: logged aircraft without a registration dropped from 417 to 55, all Chinese ones included.
+- Admin page: a **Registration backfill** section showing the download and backfill status, an **Update now** button (the page refreshes itself automatically when a running update finishes), and a list of registrations that differ from tar1090-db, each with an **Edit** button that loads tar1090-db's value into the Database editor for a manual decision.
+- Admin page: the tar1090-db differences list can be handled in batches — tick aircraft (or click rows, or select all) and either **Use tar1090-db value** (updates their `BaseStation.sqb` registration, after a confirmation) or **Keep BaseStation.sqb value** (hides them from the list; remembered together with tar1090-db's value, so an aircraft comes back for review if tar1090-db's value changes). **Show again** lists every kept one again.
+
 ## 2026-10-02
 
 ### Added

@@ -1,1 +1,17 @@
-$ICAO,$Registration,$Operator,$Type,$ICAO Type,#CMPG,$Tag 1,$#Tag 2,$#Tag 3,Category,$#Link
+$ICAO,$Registration,$Operator,$Type,$ICAO Type,#CMPG,$Tag 1,$#Tag 2,$#Tag 3,Category,$#Link,Enabled
+A56206,N446MM,Private,PA46,,Civ,,,,,,1
+461D47,OH-LCH,AirVeteran,DC3,,Civ,,,,,,1
+46788E,CC-1,,C295,,Mil,,,,,,1
+46788F,CC-2,,C295,,Mil,,,,,,1
+467896,CC-3,,C295,,Mil,,,,,,1
+46788D,LJ-1,,LJ35,,Mil,,,,,,1
+46788C,LJ-2,,LJ35,,Mil,,,,,,1
+46788B,LJ-3,,LJ35,,Mil,,,,,,1
+467890,PI-01,,PC12,,Mil,,,,,,0
+467891,PI-02,,PC12,,Mil,,,,,,0
+467892,PI-03,,PC12,,Mil,,,,,,0
+467893,PI-04,,PC12,,Mil,,,,,,0
+467894,PI-05,,PC12,,Mil,,,,,,0
+467895,PI-06,,PC12,,Mil,,,,,,0
+48EA34,SN-63,,L410,,Gov,,,,,,1
+4602F2,OH-BDA,,BE33,,Civ,,,,,,1

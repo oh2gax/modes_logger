@@ -175,6 +175,40 @@
             cursor: pointer;
             justify-content: center;
         }
+        /* Registration backfill (tar1090-db) status panel */
+        .regdb-line {
+            text-align: center;
+            font-size: 12px;
+            margin: 6px 0;
+        }
+        .regdb-error {
+            color: var(--warning-text);
+        }
+        #regdb a {
+            color: var(--link-text);
+        }
+        .regdb-batch {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin: 10px 0 0 0;
+        }
+        #regdb-selected, .regdb-hidden-note {
+            font-size: 12px;
+            color: var(--subtitle-text);
+        }
+        .regdb-check {
+            width: 28px;
+        }
+        #regdb-conflicts-form tbody tr {
+            cursor: pointer;
+        }
+        button[disabled] {
+            opacity: 0.6;
+            cursor: default;
+        }
         .db-search-form {
             display: flex;
             gap: 8px;
@@ -484,6 +518,72 @@
             <button type="submit">Save to database</button>
         </form>
     </div>
+
+    <div class="panel" id="regdb" data-running="{{ '1' if regdb_status.running else '0' }}">
+        <h2>Registration backfill</h2>
+        <p class="no-results">Fills in missing registrations and aircraft types in <code>BaseStation.sqb</code> from a daily-updated copy of the <a href="https://github.com/wiedehopf/tar1090-db" target="_blank" rel="noopener">tar1090-db</a> aircraft database — only for aircraft that have been logged, and only where the field is still empty. Existing values are never changed; where one differs from tar1090-db it's listed below for you to check. Runs automatically every day at 04:30 UTC.</p>
+        {% set m = regdb_status.meta %}
+        {% if m.downloaded_utc %}
+        <p class="regdb-line">Aircraft database: {{ "{:,}".format(m.entries|int) }} aircraft, downloaded {{ m.downloaded_utc }} · last checked for updates {{ m.checked_utc or '—' }}</p>
+        {% else %}
+        <p class="regdb-line">Aircraft database: not downloaded yet.</p>
+        {% endif %}
+        {% if m.backfill_utc %}
+        {% set regs = m.backfill_regs|int %}{% set types = m.backfill_types|int %}{% set unknown = m.backfill_unknown|int %}
+        <p class="regdb-line">Last backfill {{ m.backfill_utc }}: filled {{ regs }} registration{{ '' if regs == 1 else 's' }} and {{ types }} aircraft type{{ '' if types == 1 else 's' }} · {{ "{:,}".format(unknown) }} of {{ "{:,}".format(m.backfill_logged|int) }} logged aircraft still without a registration</p>
+        {% endif %}
+        {% if m.error %}
+        <p class="regdb-line regdb-error">Last update failed: {{ m.error }}</p>
+        {% endif %}
+        <form method="post" action="{{ url_for('admin_regdb_update') }}" class="apply-form">
+            <button type="submit" {% if regdb_status.running %}disabled{% endif %}>{{ 'Update running…' if regdb_status.running else 'Update now' }}</button>
+        </form>
+        {% if regdb_status.running %}
+        <p class="regdb-line">This page refreshes automatically when the update is done.</p>
+        {% endif %}
+        {% if regdb_status.conflicts %}
+        <details {% if regdb_open %}open{% endif %}>
+            <summary>Registrations that differ from tar1090-db ({{ regdb_status.conflicts|length }})</summary>
+            <p class="no-results">Nothing changes until you choose. Tick aircraft (or click their rows) and either use tar1090-db's registration for them, or keep your <code>BaseStation.sqb</code> value — kept ones are hidden from this list unless tar1090-db's value changes later. Edit loads a single aircraft into the Database editor above for a manual fix.</p>
+            <form method="post" action="{{ url_for('admin_regdb_conflicts') }}" id="regdb-conflicts-form">
+                <div class="regdb-batch">
+                    <span id="regdb-selected">0 selected</span>
+                    <button type="submit" name="action" value="apply" class="regdb-batch-btn" disabled onclick="return confirmRegdbApply();">Use tar1090-db value</button>
+                    <button type="submit" name="action" value="keep" class="regdb-batch-btn" disabled>Keep BaseStation.sqb value</button>
+                </div>
+                <div class="table-wrapper" style="margin: 8px 0 0 0; max-height: 360px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="regdb-check"><input type="checkbox" id="regdb-select-all" title="Select all" aria-label="Select all"></th>
+                            <th>ICAO24</th><th>BaseStation.sqb</th><th>tar1090-db</th><th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for c in regdb_status.conflicts %}
+                        <tr>
+                            <td class="regdb-check"><input type="checkbox" name="icao" value="{{ c.icao }}" class="regdb-row-check" aria-label="Select {{ c.icao }}"></td>
+                            <td>{{ c.icao }}</td>
+                            <td>{{ c.ours }}</td>
+                            <td>{{ c.theirs }}</td>
+                            <td class="actions-cell">
+                                <button type="button" class="db-edit-btn" data-icao="{{ c.icao }}" data-registration="{{ c.theirs }}" data-type="{{ c.type }}">Edit</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                </div>
+            </form>
+        </details>
+        {% endif %}
+        {% if regdb_status.hidden %}
+        <form method="post" action="{{ url_for('admin_regdb_conflicts') }}" class="regdb-batch">
+            <span class="regdb-hidden-note">{{ regdb_status.hidden }} registration{{ '' if regdb_status.hidden == 1 else 's' }} you chose to keep {{ 'is' if regdb_status.hidden == 1 else 'are' }} hidden from the list.</span>
+            <button type="submit" name="action" value="unhide">Show again</button>
+        </form>
+        {% endif %}
+    </div>
     {% endif %}
 
     <script>
@@ -558,6 +658,64 @@
                 if (regEl) regEl.focus();
             });
         });
+
+        // While a registration backfill update is running, ask the server
+        // every 3 s whether it's done (a tiny JSON request, not a page
+        // reload) and reload the page once when it is, so the new status
+        // shows up without having to remember to reload. Stops quietly on
+        // any error - a manual reload still works as before.
+        (function () {
+            var panel = document.getElementById('regdb');
+            if (!panel || panel.dataset.running !== '1') return;
+            function check() {
+                fetch('{{ url_for("admin_regdb_status") }}', { cache: 'no-store', credentials: 'same-origin' })
+                    .then(function (r) { return r.json(); })
+                    .then(function (s) {
+                        if (s.running) setTimeout(check, 3000);
+                        else window.location.reload();
+                    })
+                    .catch(function () { /* give up quietly */ });
+            }
+            setTimeout(check, 3000);
+        })();
+
+        // Registration conflict list: tick boxes (or click a row) to select,
+        // header box selects all; the batch buttons are enabled only while
+        // something is selected.
+        (function () {
+            var form = document.getElementById('regdb-conflicts-form');
+            if (!form) return;
+            var all = document.getElementById('regdb-select-all');
+            var boxes = Array.prototype.slice.call(form.querySelectorAll('.regdb-row-check'));
+            var buttons = form.querySelectorAll('.regdb-batch-btn');
+            var label = document.getElementById('regdb-selected');
+            function update() {
+                var n = boxes.filter(function (b) { return b.checked; }).length;
+                label.textContent = n + ' selected';
+                buttons.forEach(function (btn) { btn.disabled = n === 0; });
+                all.checked = n > 0 && n === boxes.length;
+                all.indeterminate = n > 0 && n < boxes.length;
+            }
+            all.addEventListener('change', function () {
+                boxes.forEach(function (b) { b.checked = all.checked; });
+                update();
+            });
+            boxes.forEach(function (b) { b.addEventListener('change', update); });
+            form.querySelectorAll('tbody tr').forEach(function (tr) {
+                tr.addEventListener('click', function (e) {
+                    if (e.target.closest('button, input')) return;
+                    var box = tr.querySelector('.regdb-row-check');
+                    box.checked = !box.checked;
+                    update();
+                });
+            });
+            update();
+        })();
+
+        function confirmRegdbApply() {
+            var n = document.querySelectorAll('.regdb-row-check:checked').length;
+            return confirm('Change the registration of ' + n + ' aircraft in BaseStation.sqb to tar1090-db\'s value?\n\nThis directly edits the shared database.');
+        }
 
         function confirmDbSave() {
             var icao = (document.getElementById('db_icao').value || '').trim().toUpperCase();
