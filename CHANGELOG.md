@@ -11,9 +11,6 @@ under that day's heading.
 - Admin page: a **Registration backfill** section showing the download and backfill status, an **Update now** button (the page refreshes itself automatically when a running update finishes), and a list of registrations that differ from tar1090-db, each with an **Edit** button that loads tar1090-db's value into the Database editor for a manual decision.
 - Admin page: the tar1090-db differences list can be handled in batches — tick aircraft (or click rows, or select all) and either **Use tar1090-db value** (updates their `BaseStation.sqb` registration, after a confirmation) or **Keep BaseStation.sqb value** (hides them from the list; remembered together with tar1090-db's value, so an aircraft comes back for review if tar1090-db's value changes). **Show again** lists every kept one again.
 
-### Changed
-- Flask's debug mode is now off (`app.run(debug=False, ...)`); it had been on since the original version. This removes the interactive in-browser debugger that debug mode shows on errors — a security risk on a server reachable from the internet — and the auto-reloader, which ran the whole app, including the live-feed, QNH and registration-update background threads, in two processes at once. The app now runs as a single process. Code and template changes no longer reload automatically: restart the app after deploying an update.
-
 ## 2026-10-02
 
 ### Added
